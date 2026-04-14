@@ -1,3 +1,6 @@
+# **The project has moved to [odedevs/ode at GitHub](https://github.com/odedevs/ode)**
+#
+
 The Open Dynamics Engine (ODE)
 ==============================
 
