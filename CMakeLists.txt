@@ -18,7 +18,10 @@ set(SOVERSION ${SOVERSION_MAJOR}.${SOVERSION_MINOR}.${SOVERSION_PATCH})
 
 set(VERSION_MAJOR 0)
 set(VERSION_MINOR 16)
-set(VERSION_PATCH 0)
+# Development trunk: carries the NEXT unreleased patch, so version checks
+# (dODE_VERSION_ATLEAST) report main as newer than the last tagged release.
+# Bump this immediately after cutting each release.
+set(VERSION_PATCH 7)
 set(VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 
 option(BUILD_SHARED_LIBS "Build shared libraries." ON)
@@ -141,6 +144,9 @@ configure_file(libccd/src/ccd/precision.h.in include/ccd/precision.h)
 configure_file(include/ode/precision.h.in include/ode/precision.h)
 
 set(ODE_VERSION ${VERSION})
+set(ODE_VERSION_MAJOR ${VERSION_MAJOR})
+set(ODE_VERSION_MINOR ${VERSION_MINOR})
+set(ODE_VERSION_PATCH ${VERSION_PATCH})
 
 configure_file(include/ode/version.h.in include/ode/version.h)
 

@@ -1,7 +1,15 @@
 dnl AC_INIT does not take a macro as a version nr: set it separately! - Bram
-AC_INIT([ODE],[0.16],[ode@ode.org])
-ODE_VERSION=0.16
+dnl Development trunk: version is the NEXT unreleased patch, so that version
+dnl checks report main as newer than the last tag. Bump after each release.
+AC_INIT([ODE],[0.16.7],[ode@ode.org])
+ODE_VERSION=0.16.7
 AC_SUBST(ODE_VERSION)
+ODE_VERSION_MAJOR=0
+ODE_VERSION_MINOR=16
+ODE_VERSION_PATCH=7
+AC_SUBST(ODE_VERSION_MAJOR)
+AC_SUBST(ODE_VERSION_MINOR)
+AC_SUBST(ODE_VERSION_PATCH)
 
 # Those are instructions from the Libtool manual:
 #  1. Start with version information of `0:0:0' for each libtool library.

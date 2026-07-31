@@ -1,6 +1,44 @@
 #ifndef _ODE_VERSION_H_
 #define _ODE_VERSION_H_
 
+/*
+ * ODE version information.
+ *
+ * dODE_VERSION        Human-readable version string, e.g. "0.16.4".
+ * dODE_VERSION_MAJOR  Numeric major component, usable in #if expressions.
+ * dODE_VERSION_MINOR  Numeric minor component, usable in #if expressions.
+ * dODE_VERSION_PATCH  Numeric patch component, usable in #if expressions.
+ * dODE_VERSION_NUMBER Single integer encoding of the version, computed as
+ *                     major*10000 + minor*100 + patch (so 0.16.4 -> 1604),
+ *                     suitable for direct ordered comparison.
+ *
+ * dODE_MAKE_VERSION(major, minor, patch)
+ *                     Encode an arbitrary (major, minor, patch) triple the
+ *                     same way as dODE_VERSION_NUMBER.
+ * dODE_VERSION_ATLEAST(major, minor, patch)
+ *                     Non-zero when the ODE headers being compiled against are
+ *                     at least version major.minor.patch. Usable in #if, e.g.
+ *
+ *                         #if dODE_VERSION_ATLEAST(0, 16, 4)
+ *                             // use API introduced in 0.16.4
+ *                         #else
+ *                             // fallback for older releases
+ *                         #endif
+ */
+
 #define dODE_VERSION "@ODE_VERSION@"
+
+#define dODE_VERSION_MAJOR @ODE_VERSION_MAJOR@
+#define dODE_VERSION_MINOR @ODE_VERSION_MINOR@
+#define dODE_VERSION_PATCH @ODE_VERSION_PATCH@
+
+#define dODE_MAKE_VERSION(major, minor, patch) \
+    ((major) * 10000 + (minor) * 100 + (patch))
+
+#define dODE_VERSION_NUMBER \
+    dODE_MAKE_VERSION(dODE_VERSION_MAJOR, dODE_VERSION_MINOR, dODE_VERSION_PATCH)
+
+#define dODE_VERSION_ATLEAST(major, minor, patch) \
+    (dODE_VERSION_NUMBER >= dODE_MAKE_VERSION((major), (minor), (patch)))
 
 #endif
