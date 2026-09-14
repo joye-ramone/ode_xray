@@ -187,6 +187,7 @@ static const char *getJointName (dxJoint *j)
 		case dJointTypeFixed: return "fixed";
 		case dJointTypeNull: return "null";
 		case dJointTypeAMotor: return "ODE_angular_motor";
+                case dJointTypeLMotor: return "ODE_linear_motor";
 	}
 	return "unknown";
 }
@@ -287,6 +288,18 @@ static void printFixed (PrintingContext &c, dxJoint *j)
 	c.print ("offset",f->offset);
 }
 
+static void printLMotor (PrintingContext &c, dxJoint *j)
+{
+       dxJointLMotor *a = (dxJointLMotor*) j;
+       c.print("num", a->num);
+       c.printIndent();
+       fprintf (c.file,"rel = {%d,%d,%d},\n",a->rel[0],a->rel[1],a->rel[2]);
+       c.print ("axis1",a->axis[0]);
+       c.print ("axis2",a->axis[1]);
+       c.print ("axis3",a->axis[2]);
+       for (int i=0; i<3; i++) printLimot (c,a->limot[i],i+1);
+}
+
 
 static void printAMotor (PrintingContext &c, dxJoint *j)
 {
@@ -326,10 +339,10 @@ static void printBox (PrintingContext &c, dxGeom *g)
 
 
 
-static void printCCylinder (PrintingContext &c, dxGeom *g)
+static void printCapsule (PrintingContext &c, dxGeom *g)
 {
 	dReal radius,length;
-	dGeomCCylinderGetParams (g,&radius,&length);
+	dGeomCapsuleGetParams (g,&radius,&length);
 	c.print ("type","capsule");
 	c.print ("radius",radius);
 	c.print ("length",length);
@@ -402,7 +415,7 @@ static void printGeom (PrintingContext &c, dxGeom *g)
 	switch (g->type) {
 		case dSphereClass: printSphere (c,g); break;
 		case dBoxClass: printBox (c,g); break;
-		case dCCylinderClass: printCCylinder (c,g); break;
+		case dCapsuleClass: printCapsule (c,g); break;
 		case dPlaneClass: printPlane (c,g); break;
 		case dRayClass: printRay (c,g); break;
 		case dGeomTransformClass: printGeomTransform (c,g); break;
@@ -446,7 +459,7 @@ void dWorldExportDIF (dWorldID w, FILE *file, const char *prefix)
 		b->tag = num;
 		fprintf (file,"%sbody[%d] = dynamics.body {\n\tworld = %sworld,\n",prefix,num,prefix);
 		c.indent++;
-		c.print ("pos",b->pos);
+		c.print ("pos",b->posr.pos);
 		c.print ("q",b->q,4);
 		c.print ("lvel",b->lvel);
 		c.print ("avel",b->avel);
@@ -525,6 +538,7 @@ void dWorldExportDIF (dWorldID w, FILE *file, const char *prefix)
 			case dJointTypeHinge2: printHinge2 (c,j); break;
 			case dJointTypeFixed: printFixed (c,j); break;
 			case dJointTypeAMotor: printAMotor (c,j); break;
+                        case dJointTypeLMotor: printLMotor (c,j); break;
 		}		
 		c.indent--;
 		c.print ("}");

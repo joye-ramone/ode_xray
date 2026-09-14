@@ -33,7 +33,7 @@
 #define dsDrawBox dsDrawBoxD
 #define dsDrawSphere dsDrawSphereD
 #define dsDrawCylinder dsDrawCylinderD
-#define dsDrawCappedCylinder dsDrawCappedCylinderD
+#define dsDrawCapsule dsDrawCapsuleD
 #define dsDrawLine dsDrawLineD
 #define dsDrawTriangle dsDrawTriangleD
 #endif
@@ -1550,7 +1550,7 @@ static void command (int cmd)
       dRFromAxisAndAngle (R,0,0,1,dRandReal()*10.0-5.0);
     }
     dBodySetRotation (obj[i].body,R);
-    dBodySetData (obj[i].body,(void*) i);
+    dBodySetData (obj[i].body,(void*)(size_t)i);
 
     if (cmd == 'b') {
       dMassSetBox (&m,DENSITY,sides[0],sides[1],sides[2]);
@@ -1558,14 +1558,14 @@ static void command (int cmd)
     }
     else if (cmd == 'c') {
       sides[0] *= 0.5;
-      dMassSetCappedCylinder (&m,DENSITY,3,sides[0],sides[1]);
-      obj[i].geom[0] = dCreateCCylinder (space,sides[0],sides[1]);
+      dMassSetCapsule (&m,DENSITY,3,sides[0],sides[1]);
+      obj[i].geom[0] = dCreateCapsule (space,sides[0],sides[1]);
     }
 /*
     // cylinder option not yet implemented
     else if (cmd == 'l') {
       sides[1] *= 0.5;
-      dMassSetCappedCylinder (&m,DENSITY,3,sides[0],sides[1]);
+      dMassSetCapsule (&m,DENSITY,3,sides[0],sides[1]);
       obj[i].geom[0] = dCreateCylinder (space,sides[0],sides[1]);
     }
 */
@@ -1613,8 +1613,8 @@ static void command (int cmd)
 	else {
 	  dReal radius = dRandReal()*0.1+0.05;
 	  dReal length = dRandReal()*1.0+0.1;
-	  g2[k] = dCreateCCylinder (0,radius,length);
-	  dMassSetCappedCylinder (&m2,DENSITY,3,radius,length);
+	  g2[k] = dCreateCapsule (0,radius,length);
+	  dMassSetCapsule (&m2,DENSITY,3,radius,length);
 	}
 	dGeomTransformSetGeom (obj[i].geom[k],g2[k]);
 
@@ -1688,10 +1688,10 @@ void drawGeom (dGeomID g, const dReal *pos, const dReal *R, int show_aabb)
   else if (type == dSphereClass) {
     dsDrawSphere (pos,R,dGeomSphereGetRadius (g));
   }
-  else if (type == dCCylinderClass) {
+  else if (type == dCapsuleClass) {
     dReal radius,length;
-    dGeomCCylinderGetParams (g,&radius,&length);
-    dsDrawCappedCylinder (pos,R,length,radius);
+    dGeomCapsuleGetParams (g,&radius,&length);
+    dsDrawCapsule (pos,R,length,radius);
   }
 /*
   // cylinder option not yet implemented
@@ -1731,12 +1731,47 @@ void drawGeom (dGeomID g, const dReal *pos, const dReal *R, int show_aabb)
 }
 
 
+// set previous transformation matrix for trimesh
+void setCurrentTransform(dGeomID geom)
+{
+ const dTriMeshDataID TriMeshData = static_cast<dTriMeshDataID>(dGeomGetData(geom));
+ const dReal* Pos = dGeomGetPosition(geom);
+ const dReal* Rot = dGeomGetRotation(geom);
+
+ const double Transform[16] = 
+ {
+   Rot[0], Rot[4], Rot[8],  0,
+   Rot[1], Rot[5], Rot[9],  0,
+   Rot[2], Rot[6], Rot[10], 0,
+   Pos[0], Pos[1], Pos[2],  1
+ };
+ dGeomTriMeshDataSet(TriMeshData, TRIMESH_LAST_TRANSFORMATION, (void *)Transform);
+}
+
+
 // simulation loop
 
 static void simLoop (int pause)
 {
   dsSetColor (0,0,2);
   dSpaceCollide (space,0,&nearCallback);
+
+
+#if 0
+  // What is this for??? - Bram
+  if (!pause) 
+  {
+    for (int i=0; i<num; i++)
+      for (int j=0; j < GPB; j++)
+        if (obj[i].geom[j])
+          if (dGeomGetClass(obj[i].geom[j]) == dTriMeshClass)
+            setCurrentTransform(obj[i].geom[j]);
+ 
+    setCurrentTransform(TriMesh1);
+    setCurrentTransform(TriMesh2);
+  }
+#endif
+
   //if (!pause) dWorldStep (world,0.05);
   if (!pause) dWorldStepFast1 (world,0.05, 5);
 
@@ -1852,6 +1887,10 @@ int main (int argc, char **argv)
   fn.command = &command;
   fn.stop = 0;
   fn.path_to_textures = "../../drawstuff/textures";
+  if(argc==2)
+    {
+        fn.path_to_textures = argv[1];
+    }
 
   // create world
 
@@ -1872,6 +1911,8 @@ int main (int argc, char **argv)
   
   TriMesh1 = dCreateTriMesh(space, TriData1, 0, 0, 0);
   TriMesh2 = dCreateTriMesh(space, TriData2, 0, 0, 0);
+  dGeomSetData(TriMesh1, TriData1);
+  dGeomSetData(TriMesh2, TriData2);
   
   {dGeomSetPosition(TriMesh1, 0, 0, 0.9);
   dMatrix3 Rotation;

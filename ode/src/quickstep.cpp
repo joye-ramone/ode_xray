@@ -47,7 +47,7 @@ typedef dReal *dRealMutablePtr;
 // help for motor-driven joints. unfortunately it appears to hurt
 // with high-friction contacts using the SOR method. use with care
 
-#define WARM_STARTING 1
+//#define WARM_STARTING 1
 
 
 // for the SOR method:
@@ -65,6 +65,35 @@ typedef dReal *dRealMutablePtr;
 // or hardly at all, but it doesn't seem to hurt.
 
 #define RANDOMLY_REORDER_CONSTRAINTS 1
+
+//****************************************************************************
+// special matrix multipliers
+
+// multiply block of B matrix (q x 6) with 12 dReal per row with C vektor (q)
+static void Multiply1_12q1 (dReal *A, dReal *B, dReal *C, int q)
+{
+  int k;
+  dReal sum;
+  dIASSERT (q>0 && A && B && C);
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[k*12] * C[k];
+  A[0] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[1+k*12] * C[k];
+  A[1] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[2+k*12] * C[k];
+  A[2] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[3+k*12] * C[k];
+  A[3] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[4+k*12] * C[k];
+  A[4] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[5+k*12] * C[k];
+  A[5] = sum;
+}
 
 //***************************************************************************
 // testing stuff
@@ -326,10 +355,12 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 	dSetZero (lambda,m);
 #endif
 
+#ifdef REORDER_CONSTRAINTS	
 	// the lambda computed at the previous iteration.
 	// this is used to measure error for when we are reordering the indexes.
 	dRealAllocaArray (last_lambda,m);
-
+#endif
+	
 	// a copy of the 'hi' vector in case findex[] is being used
 	dRealAllocaArray (hicopy,m);
 	memcpy (hicopy,hi,m*sizeof(dReal));
@@ -417,6 +448,11 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 			}
 		}
 		qsort (order,m,sizeof(IndexError),&compare_index_error);
+		
+		//@@@ potential optimization: swap lambda and last_lambda pointers rather
+		//    than copying the data. we must make sure lambda is properly
+		//    returned to the caller
+		memcpy (last_lambda,lambda,m*sizeof(dReal));                                
 #endif
 #ifdef RANDOMLY_REORDER_CONSTRAINTS
                 if ((iteration & 7) == 0) {
@@ -428,11 +464,6 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 			}
                 }
 #endif
-
-		//@@@ potential optimization: swap lambda and last_lambda pointers rather
-		//    than copying the data. we must make sure lambda is properly
-		//    returned to the caller
-		memcpy (last_lambda,lambda,m*sizeof(dReal));
 
 		for (int i=0; i<m; i++) {
 			// @@@ potential optimization: we could pre-sort J and iMJ, thereby
@@ -540,19 +571,24 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 	// for all bodies, compute the inertia tensor and its inverse in the global
 	// frame, and compute the rotational force and add it to the torque
 	// accumulator. I and invI are a vertical stack of 3x4 matrices, one per body.
-	dRealAllocaArray (I,3*4*nb);	// need to remember all I's for feedback purposes only
+	//dRealAllocaArray (I,3*4*nb);	// need to remember all I's for feedback purposes only
 	dRealAllocaArray (invI,3*4*nb);
 	for (i=0; i<nb; i++) {
 		dMatrix3 tmp;
+		dMatrix3 I;
 		// compute inertia tensor in global frame
-		dMULTIPLY2_333 (tmp,body[i]->mass.I,body[i]->R);
-		dMULTIPLY0_333 (I+i*12,body[i]->R,tmp);
+		dMULTIPLY2_333 (tmp,body[i]->mass.I,body[i]->posr.R);
+		//dMULTIPLY0_333 (I+i*12,body[i]->posr.R,tmp);
+		dMULTIPLY0_333 (I,body[i]->posr.R,tmp);
 		// compute inverse inertia tensor in global frame
-		dMULTIPLY2_333 (tmp,body[i]->invI,body[i]->R);
-		dMULTIPLY0_333 (invI+i*12,body[i]->R,tmp);
+		dMULTIPLY2_333 (tmp,body[i]->invI,body[i]->posr.R);
+		dMULTIPLY0_333 (invI+i*12,body[i]->posr.R,tmp);
+#ifdef dGYROSCOPIC
 		// compute rotational force
-		dMULTIPLY0_331 (tmp,I+i*12,body[i]->avel);
+		//dMULTIPLY0_331 (tmp,I+i*12,body[i]->avel);
+		dMULTIPLY0_331 (tmp,I,body[i]->avel);
 		dCROSS (body[i]->tacc,-=,body[i]->avel,tmp);
+#endif
 	}
 
 	// add the gravity force to all bodies
@@ -641,6 +677,30 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 			}
 		}
 
+		// make a complete backup of Jacobian
+		// since (as mentioned bellow) it gets destroyed by SOR solver
+		dRealAllocaArray (Jcopy,m*12);
+		memcpy(Jcopy, J, m*12*sizeof(dReal));
+
+		// instead of saving all Jacobian, we can save just rows
+		// for joints, that requested feedback (which is normaly much less)
+		// not implemented now to keep first debugging more transparent
+		/*int nfb = 0;
+		int mfb = 0;
+		for (i=0; i<nj; i++) 
+			if (joint[i]->feedback) {
+				nfb++;
+				mfb += info[i].m;
+			}
+		dRealAllocaArray (Jcopy,mfb*12);
+		mfb = 0;
+		for (i=0; i<nj; i++) 
+			if (joint[i]->feedback) {
+				memcpy(Jcopy+mfb*12, J+ofs[i]*12, info[i].m*12*sizeof(dReal));
+				mfb += info[i].m;
+			}*/
+
+
 		// create an array of body numbers for each joint row
 		int *jb_ptr = jb;
 		for (i=0; i<nj; i++) {
@@ -712,7 +772,7 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 		// so we must compute M*cforce.
 		// @@@ if any joint has a feedback request we compute the entire
 		//     adjusted cforce, which is not the most efficient way to do it.
-		for (j=0; j<nj; j++) {
+		/*for (j=0; j<nj; j++) {
 			if (joint[j]->feedback) {
 				// compute adjusted cforce
 				for (i=0; i<nb; i++) {
@@ -739,6 +799,33 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 							memcpy (fb->t2,cforce+b2*6+3,3*sizeof(dReal));
 						}
 					}
+				}
+			}
+		}*/
+
+		// straightforward computation of joint contraint forces:
+		// multiply related lambas with respective J' block for joints
+		// where feedback was requested
+		for (i=0; i<nj; i++) {
+			if (joint[i]->feedback) {
+				dJointFeedback *fb = joint[i]->feedback;
+				dReal data[6];
+				Multiply1_12q1 (data, Jcopy+ofs[i]*12, lambda+ofs[i], info[i].m);
+				fb->f1[0] = data[0];
+				fb->f1[1] = data[1];
+				fb->f1[2] = data[2];
+				fb->t1[0] = data[3];
+				fb->t1[1] = data[4];
+				fb->t1[2] = data[5];
+				if (joint[i]->node[1].body)
+				{
+					Multiply1_12q1 (data, Jcopy+ofs[i]*12+6, lambda+ofs[i], info[i].m);
+					fb->f2[0] = data[0];
+					fb->f2[1] = data[1];
+					fb->f2[2] = data[2];
+					fb->t2[0] = data[3];
+					fb->t2[1] = data[4];
+					fb->t2[2] = data[5];
 				}
 			}
 		}

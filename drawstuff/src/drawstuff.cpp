@@ -41,8 +41,13 @@ manage openGL state changes better
 #endif
 
 #include <ode/config.h>
+#ifdef HAVE_APPLE_OPENGL_FRAMEWORK
+#include <OpenGL/gl.h>
+#include <OpenGL/glu.h>
+#else
 #include <GL/gl.h>
 #include <GL/glu.h>
+#endif
 
 #include "drawstuff/drawstuff.h"
 #include "internal.h"
@@ -344,6 +349,28 @@ static void setTransform (const float pos[3], const float R[12])
   glPushMatrix();
   glMultMatrixf (matrix);
 }
+static void setTransformD (const double pos[3], const double R[12])
+{
+  GLdouble matrix[16];
+  matrix[0]=R[0];
+  matrix[1]=R[4];
+  matrix[2]=R[8];
+  matrix[3]=0;
+  matrix[4]=R[1];
+  matrix[5]=R[5];
+  matrix[6]=R[9];
+  matrix[7]=0;
+  matrix[8]=R[2];
+  matrix[9]=R[6];
+  matrix[10]=R[10];
+  matrix[11]=0;
+  matrix[12]=pos[0];
+  matrix[13]=pos[1];
+  matrix[14]=pos[2];
+  matrix[15]=1;
+  glPushMatrix();
+  glMultMatrixd (matrix);
+}
 
 
 // set shadow projection transform
@@ -361,6 +388,55 @@ static void setShadowTransform()
   glMultMatrixf (matrix);
 }
 
+static void drawConvex (float *_planes,unsigned int _planecount,
+			float *_points,
+			unsigned int _pointcount,
+			unsigned int *_polygons)
+{
+  unsigned int polyindex=0;
+  for(unsigned int i=0;i<_planecount;++i)
+    {
+      unsigned int pointcount=_polygons[polyindex];
+      polyindex++;
+      glBegin (GL_POLYGON);
+       glNormal3f(_planes[(i*4)+0],
+		  _planes[(i*4)+1],
+		  _planes[(i*4)+2]);
+      for(unsigned int j=0;j<pointcount;++j)
+	{
+	  glVertex3f(_points[_polygons[polyindex]*3],
+		     _points[(_polygons[polyindex]*3)+1],
+		     _points[(_polygons[polyindex]*3)+2]);
+	  polyindex++;
+	}
+      glEnd();
+    }
+}
+
+static void drawConvexD (double *_planes,unsigned int _planecount,
+			 double *_points,
+			 unsigned int _pointcount,
+			 unsigned int *_polygons)
+{
+  unsigned int polyindex=0;
+  for(unsigned int i=0;i<_planecount;++i)
+    {
+      unsigned int pointcount=_polygons[polyindex];
+      polyindex++;
+      glBegin (GL_POLYGON);
+      glNormal3d(_planes[(i*4)+0],
+		 _planes[(i*4)+1],
+		 _planes[(i*4)+2]);
+      for(unsigned int j=0;j<pointcount;++j)
+	{
+	  glVertex3d(_points[_polygons[polyindex]*3],
+		     _points[(_polygons[polyindex]*3)+1],
+		     _points[(_polygons[polyindex]*3)+2]);
+	  polyindex++;
+	}
+      glEnd();
+    }
+}
 
 static void drawBox (const float sides[3])
 {
@@ -581,7 +657,7 @@ static void drawTriangleD (const double *v0, const double *v1, const double *v2,
 
 static int capped_cylinder_quality = 3;
 
-static void drawCappedCylinder (float l, float r)
+static void drawCapsule (float l, float r)
 {
   int i,j;
   float tmp,nx,ny,nz,start_nx,start_ny,a,ca,sa;
@@ -1285,6 +1361,29 @@ extern "C" void dsDrawBox (const float pos[3], const float R[12],
   }
 }
 
+extern "C" void dsDrawConvex (const float pos[3], const float R[12],
+			      float *_planes,unsigned int _planecount,
+			      float *_points,
+			      unsigned int _pointcount,
+			      unsigned int *_polygons)
+{
+  if (current_state != 2) dsError ("drawing function called outside simulation loop");
+  setupDrawingMode();
+  glShadeModel (GL_FLAT);
+  setTransform (pos,R);
+  drawConvex(_planes,_planecount,_points,_pointcount,_polygons);
+  glPopMatrix();
+  if (use_shadows) {
+    setShadowDrawingMode();
+    setShadowTransform();
+    setTransform (pos,R);
+    drawConvex(_planes,_planecount,_points,_pointcount,_polygons);
+    glPopMatrix();
+    glPopMatrix();
+    glDepthRange (0,1);
+  }
+}
+
 
 extern "C" void dsDrawSphere (const float pos[3], const float R[12],
 			      float radius)
@@ -1357,21 +1456,21 @@ extern "C" void dsDrawCylinder (const float pos[3], const float R[12],
 }
 
 
-extern "C" void dsDrawCappedCylinder (const float pos[3], const float R[12],
+extern "C" void dsDrawCapsule (const float pos[3], const float R[12],
 				      float length, float radius)
 {
   if (current_state != 2) dsError ("drawing function called outside simulation loop");
   setupDrawingMode();
   glShadeModel (GL_SMOOTH);
   setTransform (pos,R);
-  drawCappedCylinder (length,radius);
+  drawCapsule (length,radius);
   glPopMatrix();
 
   if (use_shadows) {
     setShadowDrawingMode();
     setShadowTransform();
     setTransform (pos,R);
-    drawCappedCylinder (length,radius);
+    drawCapsule (length,radius);
     glPopMatrix();
     glPopMatrix();
     glDepthRange (0,1);
@@ -1404,6 +1503,28 @@ void dsDrawBoxD (const double pos[3], const double R[12],
   dsDrawBox (pos2,R2,fsides);
 }
 
+extern "C" void dsDrawConvexD (const double pos[3], const double R[12],
+			       double *_planes,unsigned int _planecount,
+			       double *_points,
+			       unsigned int _pointcount,
+			       unsigned int *_polygons)
+{
+  if (current_state != 2) dsError ("drawing function called outside simulation loop");
+  setupDrawingMode();
+  glShadeModel (GL_FLAT);
+  setTransformD (pos,R);
+  drawConvexD(_planes,_planecount,_points,_pointcount,_polygons);
+  glPopMatrix();
+  if (use_shadows) {
+    setShadowDrawingMode();
+    setShadowTransform();
+    setTransformD (pos,R);
+    drawConvexD(_planes,_planecount,_points,_pointcount,_polygons);
+    glPopMatrix();
+    glPopMatrix();
+    glDepthRange (0,1);
+  }
+}
 
 void dsDrawSphereD (const double pos[3], const double R[12], float radius)
 {
@@ -1443,14 +1564,14 @@ void dsDrawCylinderD (const double pos[3], const double R[12],
 }
 
 
-void dsDrawCappedCylinderD (const double pos[3], const double R[12],
+void dsDrawCapsuleD (const double pos[3], const double R[12],
 			    float length, float radius)
 {
   int i;
   float pos2[3],R2[12];
   for (i=0; i<3; i++) pos2[i]=(float)pos[i];
   for (i=0; i<12; i++) R2[i]=(float)R[i];
-  dsDrawCappedCylinder (pos2,R2,length,radius);
+  dsDrawCapsule (pos2,R2,length,radius);
 }
 
 
@@ -1470,7 +1591,7 @@ void dsSetSphereQuality (int n)
 }
 
 
-void dsSetCappedCylinderQuality (int n)
+void dsSetCapsuleQuality (int n)
 {
   capped_cylinder_quality = n;
 }

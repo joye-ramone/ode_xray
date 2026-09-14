@@ -31,6 +31,10 @@
 #include <X11/keysym.h>
 #include <GL/glx.h>
 
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
+#endif
+
 #include <drawstuff/drawstuff.h>
 #include <drawstuff/version.h>
 #include "internal.h"
@@ -164,6 +168,7 @@ static void destroyMainWindow()
   glXDestroyContext (display,glx_context);
   XDestroyWindow (display,win);
   XSync (display,0);
+  XCloseDisplay(display);
   display = 0;
   win = 0;
   glx_context = 0;
@@ -327,22 +332,30 @@ void dsPlatformSimLoop (int window_width, int window_height, dsFunctions *fn,
 
   dsStartGraphics (window_width,window_height,fn);
 
-  fprintf (stderr,
-	   "\n"
-	   "Simulation test environment v%d.%02d\n"
-	   "   Ctrl-P : pause / unpause (or say `-pause' on command line).\n"
-	   "   Ctrl-O : single step when paused.\n"
-	   "   Ctrl-T : toggle textures (or say `-notex' on command line).\n"
-	   "   Ctrl-S : toggle shadows (or say `-noshadow' on command line).\n"
-	   "   Ctrl-V : print current viewpoint coordinates (x,y,z,h,p,r).\n"
-	   "   Ctrl-W : write frames to ppm files: frame/frameNNN.ppm\n"
-	   "   Ctrl-X : exit.\n"
-	   "\n"
-	   "Change the camera position by clicking + dragging in the window.\n"
-	   "   Left button - pan and tilt.\n"
-	   "   Right button - forward and sideways.\n"
-	   "   Left + Right button (or middle button) - sideways and up.\n"
-	   "\n",DS_VERSION >> 8,DS_VERSION & 0xff);
+  static bool firsttime=true;
+  if (firsttime)
+  {
+    fprintf
+    (
+      stderr,
+      "\n"
+      "Simulation test environment v%d.%02d\n"
+      "   Ctrl-P : pause / unpause (or say `-pause' on command line).\n"
+      "   Ctrl-O : single step when paused.\n"
+      "   Ctrl-T : toggle textures (or say `-notex' on command line).\n"
+      "   Ctrl-S : toggle shadows (or say `-noshadow' on command line).\n"
+      "   Ctrl-V : print current viewpoint coordinates (x,y,z,h,p,r).\n"
+      "   Ctrl-W : write frames to ppm files: frame/frameNNN.ppm\n"
+      "   Ctrl-X : exit.\n"
+      "\n"
+      "Change the camera position by clicking + dragging in the window.\n"
+      "   Left button - pan and tilt.\n"
+      "   Right button - forward and sideways.\n"
+      "   Left + Right button (or middle button) - sideways and up.\n"
+      "\n",DS_VERSION >> 8,DS_VERSION & 0xff
+    );
+    firsttime = false;
+  }
 
   if (fn->start) fn->start();
 
@@ -381,3 +394,25 @@ extern "C" void dsStop()
 {
   run = 0;
 }
+
+
+extern "C" double dsElapsedTime()
+{
+#if HAVE_GETTIMEOFDAY
+  static double prev=0.0;
+  timeval tv ;
+
+  gettimeofday(&tv, 0);
+  double curr = tv.tv_sec + (double) tv.tv_usec / 1000000.0 ;
+  if (!prev)
+    prev=curr;
+  double retval = curr-prev;
+  prev=curr;
+  if (retval>1.0) retval=1.0;
+  if (retval<dEpsilon) retval=dEpsilon;
+  return retval;
+#else
+  return 0.01666; // Assume 60 fps
+#endif
+}
+

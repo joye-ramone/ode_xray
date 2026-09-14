@@ -20,7 +20,7 @@
  *                                                                       *
  *************************************************************************/
 
-#ifdef WIN32		// this prevents warnings when dependencies built
+#if defined(WIN32) || defined(__CYGWIN__)// this prevents warnings when dependencies built
 #include <windows.h>
 #endif
 #include <ode/config.h>
@@ -188,7 +188,7 @@ static LRESULT CALLBACK mainWndProc (HWND hWnd, UINT msg, WPARAM wParam,
 				     LPARAM lParam)
 {
   static int button=0,lastx=0,lasty=0;
-  int ctrl = wParam & MK_CONTROL;
+  int ctrl = int(wParam & MK_CONTROL);
 
   switch (msg) {
   case WM_LBUTTONDOWN:
@@ -224,7 +224,7 @@ static LRESULT CALLBACK mainWndProc (HWND hWnd, UINT msg, WPARAM wParam,
     if (wParam >= ' ' && wParam <= 126) {
       int nexth = (keybuffer_head+1) & 15;
       if (nexth != keybuffer_tail) {
-	keybuffer[keybuffer_head] = wParam;
+	keybuffer[keybuffer_head] = int(wParam);
 	keybuffer_head = nexth;
       }
     }
@@ -466,6 +466,21 @@ extern "C" void dsStop()
 
   if (main_window) PostMessage (main_window,WM_QUIT,0,0);
 }
+
+
+extern "C" double dsElapsedTime()
+{
+  static double prev=0.0;
+  double curr = timeGetTime()/1000.0;
+  if (!prev)
+    prev=curr;
+  double retval = curr-prev;
+  prev=curr;
+  if (retval>1.0) retval=1.0;
+  if (retval<dEpsilon) retval=dEpsilon;
+  return retval;
+}
+
 
 //***************************************************************************
 // windows entry point
