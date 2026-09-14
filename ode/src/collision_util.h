@@ -32,7 +32,6 @@ some useful collision utility stuff.
 #include <ode/common.h>
 #include <ode/contact.h>
 
-
 // given a pointer `p' to a dContactGeom, return the dContactGeom at
 // p + skip bytes.
 #define CONTACT(p,skip) ((dContactGeom*) (((char*)p) + (skip)))

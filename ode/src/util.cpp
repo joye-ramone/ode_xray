@@ -32,12 +32,13 @@
 
 void dInternalHandleAutoDisabling (dxWorld *world, dReal stepsize)
 {
+	/*
 	dxBody *bb;
 	for (bb=world->firstbody; bb; bb=(dxBody*)bb->next) {
 		// nothing to do unless this body is currently enabled and has
 		// the auto-disable flag set
 		if ((bb->flags & (dxBodyAutoDisable|dxBodyDisabled)) != dxBodyAutoDisable) continue;
-		
+
 		// see if the body is idle
 		int idle = 1;			// initial assumption
 		dReal lspeed2 = dDOT(bb->lvel,bb->lvel);
@@ -50,7 +51,7 @@ void dInternalHandleAutoDisabling (dxWorld *world, dReal stepsize)
 				idle = 0;	// turning fast - not idle
 			}
 		}
-	
+
 		// if it's idle, accumulate steps and time.
 		// these counters won't overflow because this code doesn't run for disabled bodies.
 		if (idle) {
@@ -67,6 +68,7 @@ void dInternalHandleAutoDisabling (dxWorld *world, dReal stepsize)
 			bb->flags |= dxBodyDisabled;
 		}
 	}
+	*/
 }
 
 
@@ -92,7 +94,9 @@ static inline dReal sinc (dReal x)
 void dxStepBody (dxBody *b, dReal h)
 {
   int j;
-
+#ifdef DEBUG_VALID
+dIASSERT(dValid(b->avel[0])&&dValid(b->avel[1])&&dValid(b->avel[2]));
+#endif
   // handle linear velocity
   for (j=0; j<3; j++) b->pos[j] += h * b->lvel[j];
 
@@ -161,6 +165,10 @@ void dxStepBody (dxBody *b, dReal h)
   // notify all attached geoms that this body has moved
   for (dxGeom *geom = b->geom; geom; geom = dGeomGetBodyNext (geom))
     dGeomMoved (geom);
+
+#ifdef DEBUG_VALID
+dIASSERT(dValid(b->avel[0])&&dValid(b->avel[1])&&dValid(b->avel[2]));
+#endif
 }
 
 //****************************************************************************
@@ -177,6 +185,8 @@ void dxStepBody (dxBody *b, dReal h)
 // bodies will not be included in the simulation. disabled bodies are
 // re-enabled if they are found to be part of an active island.
 
+//no need Island collecting! @slipch
+/*
 void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper)
 {
   dxBody *b,*bb,**body;
@@ -187,7 +197,7 @@ void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper)
 
   // handle auto-disabling of bodies
   dInternalHandleAutoDisabling (world,stepsize);
-  
+
   // make arrays for body and joint lists (for a single island) to go into
   body = (dxBody**) ALLOCA (world->nb * sizeof(dxBody*));
   joint = (dxJoint**) ALLOCA (world->nj * sizeof(dxJoint*));
@@ -274,4 +284,44 @@ void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper)
     }
   }
 # endif
+}
+*/
+void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper)
+{
+	// nothing to do if no bodies
+	if (world->nb <= 0)
+		return;
+
+#	ifdef TIMING
+	dTimerStart ("creating joint and body arrays");
+#	endif
+	dxBody **bodies, *body;
+	dxJoint **joints, *joint;
+	joints = (dxJoint **) ALLOCA (world->nj * sizeof (dxJoint *));
+	bodies = (dxBody **) ALLOCA (world->nb * sizeof (dxBody *));
+
+	int nj = 0;
+    for (joint = world->firstjoint; joint; joint = (dxJoint*)joint->next)
+    {
+        if (!joint->node[0].body)
+            return;
+
+        joints[nj++] = joint;
+    }
+
+	int nb = 0;
+	for (body = world->firstbody; body; body = (dxBody *) body->next)
+	{
+		body->flags &= ~dxBodyDisabled;
+		bodies[nb++] = body;
+
+	}
+
+	// now do something with body and joint lists
+	stepper (world,bodies,nb,joints,nj,stepsize);
+//stepper (world,body,bcount,joint,jcount,stepsize);
+#	ifdef TIMING
+	dTimerEnd ();
+	dTimerReport (stdout, 1);
+#	endif
 }

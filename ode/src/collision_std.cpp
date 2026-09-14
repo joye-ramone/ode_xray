@@ -442,16 +442,10 @@ void dGeomRaySet (dGeomID g, dReal px, dReal py, dReal pz,
 		  dReal dx, dReal dy, dReal dz)
 {
   dUASSERT (g && g->type == dRayClass,"argument not a ray");
-  dReal* rot = g->R;
-  dReal* pos = g->pos;
-  pos[0] = px;
-  pos[1] = py;
-  pos[2] = pz;
-
-  rot[0*4+2] = dx;
-  rot[1*4+2] = dy;
-  rot[2*4+2] = dz;
-  dGeomMoved (g);
+  dGeomSetPosition (g,px,py,pz);
+  dMatrix3 R;
+  dRFromZAxis (R,dx,dy,dz);
+  dGeomSetRotation (g,R);
 }
 
 
@@ -506,6 +500,56 @@ int dGeomRayGetClosestHit (dxGeom *g)
 {
   dUASSERT (g && g->type == dRayClass,"argument not a ray");
   return ((g->gflags & RAY_CLOSEST_HIT) != 0);
+}
+
+//****************************************************************************
+// geom group public API
+
+enum {
+  dGeomGroupClass = dSimpleSpaceClass
+};
+
+
+dGeomID dCreateGeomGroup (dSpaceID space)
+{
+  dSpaceID s = dSimpleSpaceCreate (space);
+  dSpaceSetCleanup (s,0);
+  return s;
+}
+
+
+void dGeomGroupAdd (dxGeom *g, dxGeom *x)
+{
+  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
+  dSpaceAdd ((dxSpace*)g,x);
+}
+
+
+void dGeomGroupRemove (dxGeom *g, dxGeom *x)
+{
+  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
+  dSpaceRemove ((dxSpace*)g,x);
+}
+
+
+int dGeomGroupGetNumGeoms (dxGeom *g)
+{
+  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
+  return dSpaceGetNumGeoms ((dxSpace*)g);
+}
+
+
+dGeomID dGeomGroupGetGeom (dxGeom *g, int i)
+{
+  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
+  return dSpaceGetGeom ((dxSpace*)g,i);
+}
+
+
+int dGeomGroupQuery (dxGeom *g, dxGeom *x)
+{
+  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
+  return dSpaceQuery ((dxSpace*)g,x);
 }
 
 //****************************************************************************
@@ -657,361 +701,541 @@ void cullPoints (int n, dReal p[], int m, int i0, int iret[])
 // collision functions. this function only fills in the position and depth
 // fields.
 
-int dBoxBox (const dVector3 p1, const dMatrix3 R1,
-	     const dVector3 side1, const dVector3 p2,
-	     const dMatrix3 R2, const dVector3 side2,
-	     dVector3 normal, dReal *depth, int *return_code,
-	     int maxc, dContactGeom *contact, int skip)
+inline bool pointInBox(const dReal* point,const dReal* p,const dReal* R,const dReal* side){
+	dVector3 dif={point[0]-p[0],point[1]-p[1],point[2]-p[2]};
+	dReal dx,dy,dz;
+	dx=dFabs(dDOT14(dif,R+0));
+	dy=dFabs(dDOT14(dif,R+1));
+	dz=dFabs(dDOT14(dif,R+2));
+	return
+		(!(dx>side[0]/2.f))&&
+		(!(dy>side[1]/2.f))&&
+		(!(dz>side[2]/2.f));
+
+}
+
+inline bool CrossBoxSide(const dReal* point,const dReal* dir,
+						 const dReal* p,const dReal* R,const dReal* side,
+						 const int side_num,const float sign,dReal* out_p)
 {
-  const dReal fudge_factor = REAL(1.05);
-  dVector3 p,pp,normalC;
-  const dReal *normalR = 0;
-  dReal A[3],B[3],R11,R12,R13,R21,R22,R23,R31,R32,R33,
-    Q11,Q12,Q13,Q21,Q22,Q23,Q31,Q32,Q33,s,s2,l;
-  int i,j,invert_normal,code;
+	dVector3 plane_point={p[0],p[1],p[2]};
+	int i;
 
-  // get vector from centers of box 1 to box 2, relative to box 1
-  p[0] = p2[0] - p1[0];
-  p[1] = p2[1] - p1[1];
-  p[2] = p2[2] - p1[2];
-  dMULTIPLY1_331 (pp,R1,p);		// get pp = p relative to body 1
+	for (i=0;i<3;i++)plane_point[i]+=R[side_num+i*4]*side[side_num]*sign;
+	//dReal _cos=dDOT14(dir,R[side_num]);
 
-  // get side lengths / 2
-  A[0] = side1[0]*REAL(0.5);
-  A[1] = side1[1]*REAL(0.5);
-  A[2] = side1[2]*REAL(0.5);
-  B[0] = side2[0]*REAL(0.5);
-  B[1] = side2[1]*REAL(0.5);
-  B[2] = side2[2]*REAL(0.5);
+	dReal length=(dDOT14(point,R+side_num)-dDOT14(plane_point,R+side_num))/dDOT14(dir,R+side_num);
+	for (i=0;i<3;i++)out_p[i]=plane_point[i]-dir[i]*length*sign;
+	int nx1=(side_num+1)%3;
+	int nx2=(side_num+2)%3;
+	return !((dFabs(dDOT14(out_p,R+nx1)-dDOT14(plane_point,R+nx1))>side[nx1]/2.f))&&
+		!((dFabs(dDOT14(out_p,R+nx2)-dDOT14(plane_point,R+nx2))>side[nx2]/2.f));
+}
 
-  // Rij is R1'*R2, i.e. the relative rotation between R1 and R2
-  R11 = dDOT44(R1+0,R2+0); R12 = dDOT44(R1+0,R2+1); R13 = dDOT44(R1+0,R2+2);
-  R21 = dDOT44(R1+1,R2+0); R22 = dDOT44(R1+1,R2+1); R23 = dDOT44(R1+1,R2+2);
-  R31 = dDOT44(R1+2,R2+0); R32 = dDOT44(R1+2,R2+1); R33 = dDOT44(R1+2,R2+2);
+inline bool CrossBoxSide44(const dReal* point,const dReal* R1,const int ax_num,
+						   const dReal* p,const dReal* R2,const dReal* side,
+						   const int side_num,const float sign,dReal* out_p)
+{
+	dVector3 plane_point={p[0],p[1],p[2]};
+	int i;
 
-  Q11 = dFabs(R11); Q12 = dFabs(R12); Q13 = dFabs(R13);
-  Q21 = dFabs(R21); Q22 = dFabs(R22); Q23 = dFabs(R23);
-  Q31 = dFabs(R31); Q32 = dFabs(R32); Q33 = dFabs(R33);
+	for (i=0;i<3;i++)plane_point[i]+=R2[side_num+i*4]*side[side_num]/2.f*sign;
+	dReal _cos=dDOT44(R1+ax_num,R2+side_num);
 
-  // for all 15 possible separating axes:
-  //   * see if the axis separates the boxes. if so, return 0.
-  //   * find the depth of the penetration along the separating axis (s2)
-  //   * if this is the largest depth so far, record it.
-  // the normal vector will be set to the separating axis with the smallest
-  // depth. note: normalR is set to point to a column of R1 or R2 if that is
-  // the smallest depth normal so far. otherwise normalR is 0 and normalC is
-  // set to a vector relative to body 1. invert_normal is 1 if the sign of
-  // the normal should be flipped.
+	dReal length=(dDOT14(point,R2+side_num)-dDOT14(plane_point,R2+side_num))/_cos;
+	for (i=0;i<3;i++)out_p[i]=point[i]-R1[i*4+ax_num]*length;
+	int nx1=(side_num+1)%3;
+	int nx2=(side_num+2)%3;
+	//dReal pr1 =dFabs(dDOT14(out_p,R2+nx1)-dDOT14(plane_point,R2+nx1));
+	//dReal pr2 =dFabs(dDOT14(out_p,R2+nx2)-dDOT14(plane_point,R2+nx2));
+	return !((dFabs(dDOT14(out_p,R2+nx1)-dDOT14(plane_point,R2+nx1))>side[nx1]/2.f))&&
+		!((dFabs(dDOT14(out_p,R2+nx2)-dDOT14(plane_point,R2+nx2))>side[nx2]/2.f));
+}
+
+int dBoxBox (const dVector3 p1, const dMatrix3 R1,
+			 const dVector3 side1, const dVector3 p2,
+			 const dMatrix3 R2, const dVector3 side2,
+			 dVector3 normal, dReal *depth, int *return_code,
+			 int maxc, dContactGeom *contact, int skip)
+{
+
+	const dReal fudge_factor = 1.05f;//1.05->1.25 @slipch
+	dVector3 p,pp,normalC;
+	const dReal *normalR = 0;
+	dReal A[3],B[3],R11,R12,R13,R21,R22,R23,R31,R32,R33,
+		Q11,Q12,Q13,Q21,Q22,Q23,Q31,Q32,Q33,s,s2,l;
+	int i,j,invert_normal,code;
+
+	// get vector from centers of box 1 to box 2, relative to box 1
+	p[0] = p2[0] - p1[0];
+	p[1] = p2[1] - p1[1];
+	p[2] = p2[2] - p1[2];
+	dMULTIPLY1_331 (pp,R1,p);		// get pp = p relative to body 1
+
+	// get side lengths / 2
+	A[0] = side1[0]*REAL(0.5);
+	A[1] = side1[1]*REAL(0.5);
+	A[2] = side1[2]*REAL(0.5);
+	B[0] = side2[0]*REAL(0.5);
+	B[1] = side2[1]*REAL(0.5);
+	B[2] = side2[2]*REAL(0.5);
+
+	// Rij is R1'*R2, i.e. the relative rotation between R1 and R2
+	R11 = dDOT44(R1+0,R2+0); R12 = dDOT44(R1+0,R2+1); R13 = dDOT44(R1+0,R2+2);
+	R21 = dDOT44(R1+1,R2+0); R22 = dDOT44(R1+1,R2+1); R23 = dDOT44(R1+1,R2+2);
+	R31 = dDOT44(R1+2,R2+0); R32 = dDOT44(R1+2,R2+1); R33 = dDOT44(R1+2,R2+2);
+
+	Q11 = dFabs(R11); Q12 = dFabs(R12); Q13 = dFabs(R13);
+	Q21 = dFabs(R21); Q22 = dFabs(R22); Q23 = dFabs(R23);
+	Q31 = dFabs(R31); Q32 = dFabs(R32); Q33 = dFabs(R33);
+
+	// for all 15 possible separating axes:
+	//   * see if the axis separates the boxes. if so, return 0.
+	//   * find the depth of the penetration along the separating axis (s2)
+	//   * if this is the largest depth so far, record it.
+	// the normal vector will be set to the separating axis with the smallest
+	// depth. note: normalR is set to point to a column of R1 or R2 if that is
+	// the smallest depth normal so far. otherwise normalR is 0 and normalC is
+	// set to a vector relative to body 1. invert_normal is 1 if the sign of
+	// the normal should be flipped.
 
 #define TST(expr1,expr2,norm,cc) \
-  s2 = dFabs(expr1) - (expr2); \
-  if (s2 > 0) return 0; \
-  if (s2 > s) { \
-    s = s2; \
-    normalR = norm; \
-    invert_normal = ((expr1) < 0); \
-    code = (cc); \
-  }
+	s2 = dFabs(expr1) - (expr2); \
+	if (s2 > 0) return 0; \
+	if (s2 > s) { \
+	s = s2; \
+	normalR = norm; \
+	invert_normal = ((expr1) < 0); \
+	code = (cc); \
+	}
 
-  s = -dInfinity;
-  invert_normal = 0;
-  code = 0;
+	s = -dInfinity;
+	invert_normal = 0;
+	code = 0;
 
-  // separating axis = u1,u2,u3
-  TST (pp[0],(A[0] + B[0]*Q11 + B[1]*Q12 + B[2]*Q13),R1+0,1);
-  TST (pp[1],(A[1] + B[0]*Q21 + B[1]*Q22 + B[2]*Q23),R1+1,2);
-  TST (pp[2],(A[2] + B[0]*Q31 + B[1]*Q32 + B[2]*Q33),R1+2,3);
+	// separating axis = u1,u2,u3
+	TST (pp[0],(A[0] + B[0]*Q11 + B[1]*Q12 + B[2]*Q13),R1+0,1);
+	TST (pp[1],(A[1] + B[0]*Q21 + B[1]*Q22 + B[2]*Q23),R1+1,2);
+	TST (pp[2],(A[2] + B[0]*Q31 + B[1]*Q32 + B[2]*Q33),R1+2,3);
 
-  // separating axis = v1,v2,v3
-  TST (dDOT41(R2+0,p),(A[0]*Q11 + A[1]*Q21 + A[2]*Q31 + B[0]),R2+0,4);
-  TST (dDOT41(R2+1,p),(A[0]*Q12 + A[1]*Q22 + A[2]*Q32 + B[1]),R2+1,5);
-  TST (dDOT41(R2+2,p),(A[0]*Q13 + A[1]*Q23 + A[2]*Q33 + B[2]),R2+2,6);
+	// separating axis = v1,v2,v3
+	TST (dDOT41(R2+0,p),(A[0]*Q11 + A[1]*Q21 + A[2]*Q31 + B[0]),R2+0,4);
+	TST (dDOT41(R2+1,p),(A[0]*Q12 + A[1]*Q22 + A[2]*Q32 + B[1]),R2+1,5);
+	TST (dDOT41(R2+2,p),(A[0]*Q13 + A[1]*Q23 + A[2]*Q33 + B[2]),R2+2,6);
 
-  // note: cross product axes need to be scaled when s is computed.
-  // normal (n1,n2,n3) is relative to box 1.
+	// note: cross product axes need to be scaled when s is computed.
+	// normal (n1,n2,n3) is relative to box 1.
 #undef TST
 #define TST(expr1,expr2,n1,n2,n3,cc) \
-  s2 = dFabs(expr1) - (expr2); \
-  if (s2 > 0) return 0; \
-  l = dSqrt ((n1)*(n1) + (n2)*(n2) + (n3)*(n3)); \
-  if (l > 0) { \
-    s2 /= l; \
-    if (s2*fudge_factor > s) { \
-      s = s2; \
-      normalR = 0; \
-      normalC[0] = (n1)/l; normalC[1] = (n2)/l; normalC[2] = (n3)/l; \
-      invert_normal = ((expr1) < 0); \
-      code = (cc); \
-    } \
-  }
+	s2 = dFabs(expr1) - (expr2); \
+	if (s2 > 0) return 0; \
+	l = dSqrt ((n1)*(n1) + (n2)*(n2) + (n3)*(n3)); \
+	if (l > 0) { \
+	s2 /= l; \
+	if (s2*fudge_factor > s) { \
+	s = s2; \
+	normalR = 0; \
+	normalC[0] = (n1)/l; normalC[1] = (n2)/l; normalC[2] = (n3)/l; \
+	invert_normal = ((expr1) < 0); \
+	code = (cc); \
+	} \
+	}
 
-  // separating axis = u1 x (v1,v2,v3)
-  TST(pp[2]*R21-pp[1]*R31,(A[1]*Q31+A[2]*Q21+B[1]*Q13+B[2]*Q12),0,-R31,R21,7);
-  TST(pp[2]*R22-pp[1]*R32,(A[1]*Q32+A[2]*Q22+B[0]*Q13+B[2]*Q11),0,-R32,R22,8);
-  TST(pp[2]*R23-pp[1]*R33,(A[1]*Q33+A[2]*Q23+B[0]*Q12+B[1]*Q11),0,-R33,R23,9);
+	// separating axis = u1 x (v1,v2,v3)
+	TST(pp[2]*R21-pp[1]*R31,(A[1]*Q31+A[2]*Q21+B[1]*Q13+B[2]*Q12),0,-R31,R21,7);
+	TST(pp[2]*R22-pp[1]*R32,(A[1]*Q32+A[2]*Q22+B[0]*Q13+B[2]*Q11),0,-R32,R22,8);
+	TST(pp[2]*R23-pp[1]*R33,(A[1]*Q33+A[2]*Q23+B[0]*Q12+B[1]*Q11),0,-R33,R23,9);
 
-  // separating axis = u2 x (v1,v2,v3)
-  TST(pp[0]*R31-pp[2]*R11,(A[0]*Q31+A[2]*Q11+B[1]*Q23+B[2]*Q22),R31,0,-R11,10);
-  TST(pp[0]*R32-pp[2]*R12,(A[0]*Q32+A[2]*Q12+B[0]*Q23+B[2]*Q21),R32,0,-R12,11);
-  TST(pp[0]*R33-pp[2]*R13,(A[0]*Q33+A[2]*Q13+B[0]*Q22+B[1]*Q21),R33,0,-R13,12);
+	// separating axis = u2 x (v1,v2,v3)
+	TST(pp[0]*R31-pp[2]*R11,(A[0]*Q31+A[2]*Q11+B[1]*Q23+B[2]*Q22),R31,0,-R11,10);
+	TST(pp[0]*R32-pp[2]*R12,(A[0]*Q32+A[2]*Q12+B[0]*Q23+B[2]*Q21),R32,0,-R12,11);
+	TST(pp[0]*R33-pp[2]*R13,(A[0]*Q33+A[2]*Q13+B[0]*Q22+B[1]*Q21),R33,0,-R13,12);
 
-  // separating axis = u3 x (v1,v2,v3)
-  TST(pp[1]*R11-pp[0]*R21,(A[0]*Q21+A[1]*Q11+B[1]*Q33+B[2]*Q32),-R21,R11,0,13);
-  TST(pp[1]*R12-pp[0]*R22,(A[0]*Q22+A[1]*Q12+B[0]*Q33+B[2]*Q31),-R22,R12,0,14);
-  TST(pp[1]*R13-pp[0]*R23,(A[0]*Q23+A[1]*Q13+B[0]*Q32+B[1]*Q31),-R23,R13,0,15);
+	// separating axis = u3 x (v1,v2,v3)
+	TST(pp[1]*R11-pp[0]*R21,(A[0]*Q21+A[1]*Q11+B[1]*Q33+B[2]*Q32),-R21,R11,0,13);
+	TST(pp[1]*R12-pp[0]*R22,(A[0]*Q22+A[1]*Q12+B[0]*Q33+B[2]*Q31),-R22,R12,0,14);
+	TST(pp[1]*R13-pp[0]*R23,(A[0]*Q23+A[1]*Q13+B[0]*Q32+B[1]*Q31),-R23,R13,0,15);
 
 #undef TST
 
-  if (!code) return 0;
+	if (!code) return 0;
 
-  // if we get to this point, the boxes interpenetrate. compute the normal
-  // in global coordinates.
-  if (normalR) {
-    normal[0] = normalR[0];
-    normal[1] = normalR[4];
-    normal[2] = normalR[8];
-  }
-  else {
-    dMULTIPLY0_331 (normal,R1,normalC);
-  }
-  if (invert_normal) {
-    normal[0] = -normal[0];
-    normal[1] = -normal[1];
-    normal[2] = -normal[2];
-  }
-  *depth = -s;
+	// if we get to this point, the boxes interpenetrate. compute the normal
+	// in global coordinates.
+	if (normalR) {
+		normal[0] = normalR[0];
+		normal[1] = normalR[4];
+		normal[2] = normalR[8];
+	}
+	else {
+		dMULTIPLY0_331 (normal,R1,normalC);
+	}
+	if (invert_normal) {
+		normal[0] = -normal[0];
+		normal[1] = -normal[1];
+		normal[2] = -normal[2];
+	}
+	*depth = -s;
 
-  // compute contact point(s)
+	// compute contact point(s)
 
-  if (code > 6) {
-    // an edge from box 1 touches an edge from box 2.
-    // find a point pa on the intersecting edge of box 1
-    dVector3 pa;
-    dReal sign;
-    for (i=0; i<3; i++) pa[i] = p1[i];
-    for (j=0; j<3; j++) {
-      sign = (dDOT14(normal,R1+j) > 0) ? REAL(1.0) : REAL(-1.0);
-      for (i=0; i<3; i++) pa[i] += sign * A[j] * R1[i*4+j];
-    }
+	if (code > 6) {
+		// an edge from box 1 touches an edge from box 2.
+		int iacr=((code)-7)/3;
+		int ibcr=((code)-7)%3;
+		int iamx,ianx,ibmx,ibnx;
+		int ret=0;
+		if(
+			dFabs(dDOT14(normal,R1+(iacr+1)%3))>
+			dFabs(dDOT14(normal,R1+(iacr+2)%3))
+			)
+		{
+			iamx=(iacr+1)%3;
+			ianx=(iacr+2)%3;
+		}
+		else
+		{
+			iamx=(iacr+2)%3;
+			ianx=(iacr+1)%3;
+		}
 
-    // find a point pb on the intersecting edge of box 2
-    dVector3 pb;
-    for (i=0; i<3; i++) pb[i] = p2[i];
-    for (j=0; j<3; j++) {
-      sign = (dDOT14(normal,R2+j) > 0) ? REAL(-1.0) : REAL(1.0);
-      for (i=0; i<3; i++) pb[i] += sign * B[j] * R2[i*4+j];
-    }
+		if(
+			dFabs(dDOT14(normal,R2+(ibcr+1)%3))>
+			dFabs(dDOT14(normal,R2+(ibcr+2)%3))
+			)
+		{
+			ibmx=(ibcr+1)%3;
+			ibnx=(ibcr+2)%3;
+		}
+		else
+		{
+			ibmx=(ibcr+2)%3;
+			ibnx=(ibcr+1)%3;
+		}
 
-    dReal alpha,beta;
-    dVector3 ua,ub;
-    for (i=0; i<3; i++) ua[i] = R1[((code)-7)/3 + i*4];
-    for (i=0; i<3; i++) ub[i] = R2[((code)-7)%3 + i*4];
 
-    dLineClosestApproach (pa,ua,pb,ub,&alpha,&beta);
-    for (i=0; i<3; i++) pa[i] += ua[i]*alpha;
-    for (i=0; i<3; i++) pb[i] += ub[i]*beta;
+		// find a point pa on the intersecting edge of box 1
+		dVector3 pa;
+		dReal sign;
+		for (i=0; i<3; i++) pa[i] = p1[i];
+		for (j=0; j<3; j++) {
+			sign = (dDOT14(normal,R1+j) > 0.f) ? REAL(1.0) : REAL(-1.0);
+			for (i=0; i<3; i++) pa[i] += sign * A[j] * R1[i*4+j];
+		}
 
-    for (i=0; i<3; i++) contact[0].pos[i] = REAL(0.5)*(pa[i]+pb[i]);
-    contact[0].depth = *depth;
-    *return_code = code;
-    return 1;
-  }
+		dVector3  pa1,pa2,pa3;//psf,
+		/* 
+		sign = (dDOT14(normal,R1+iamx) > 0.f) ? REAL(1.0) : REAL(-1.0);
+		for (i=0; i<3; i++) psf[i] = p1[i]+sign * A[iamx] * R1[i*4+iamx];
 
-  // okay, we have a face-something intersection (because the separating
-  // axis is perpendicular to a face). define face 'a' to be the reference
-  // face (i.e. the normal vector is perpendicular to this) and face 'b' to be
-  // the incident face (the closest face of the other box).
+		sign = (dDOT14(normal,R1+iacr) > 0.f) ? REAL(1.0) : REAL(-1.0);
+		for (i=0; i<3; i++) pa1[i] =psf[i]+ sign * A[iacr] * R1[i*4+iacr];
+		for (i=0; i<3; i++) pa2[i] =psf[i]- sign * A[iacr] * R1[i*4+iacr];
 
-  const dReal *Ra,*Rb,*pa,*pb,*Sa,*Sb;
-  if (code <= 3) {
-    Ra = R1;
-    Rb = R2;
-    pa = p1;
-    pb = p2;
-    Sa = A;
-    Sb = B;
-  }
-  else {
-    Ra = R2;
-    Rb = R1;
-    pa = p2;
-    pb = p1;
-    Sa = B;
-    Sb = A;
-  }
+		sign = (dDOT14(normal,R1+ianx) > 0.f) ? REAL(1.0) : REAL(-1.0);
+		for (i=0; i<3; i++) pa3[i] =psf[i]+ sign * A[ianx] * R1[i*4+ianx];
+		*/
 
-  // nr = normal vector of reference face dotted with axes of incident box.
-  // anr = absolute values of nr.
-  dVector3 normal2,nr,anr;
-  if (code <= 3) {
-    normal2[0] = normal[0];
-    normal2[1] = normal[1];
-    normal2[2] = normal[2];
-  }
-  else {
-    normal2[0] = -normal[0];
-    normal2[1] = -normal[1];
-    normal2[2] = -normal[2];
-  }
-  dMULTIPLY1_331 (nr,Rb,normal2);
-  anr[0] = dFabs (nr[0]);
-  anr[1] = dFabs (nr[1]);
-  anr[2] = dFabs (nr[2]);
+		dVector3  pb1,pb2,pb3;
+		/*
+		sign = (dDOT14(normal,R2+ibmx) > 0.f) ? REAL(1.0) : REAL(-1.0);
+		for (i=0; i<3; i++) psf[i] = p2[i]+sign * B[ibmx] * R2[i*4+ibmx];
 
-  // find the largest compontent of anr: this corresponds to the normal
-  // for the indident face. the other axis numbers of the indicent face
-  // are stored in a1,a2.
-  int lanr,a1,a2;
-  if (anr[1] > anr[0]) {
-    if (anr[1] > anr[2]) {
-      a1 = 0;
-      lanr = 1;
-      a2 = 2;
-    }
-    else {
-      a1 = 0;
-      a2 = 1;
-      lanr = 2;
-    }
-  }
-  else {
-    if (anr[0] > anr[2]) {
-      lanr = 0;
-      a1 = 1;
-      a2 = 2;
-    }
-    else {
-      a1 = 0;
-      a2 = 1;
-      lanr = 2;
-    }
-  }
+		sign = (dDOT14(normal,R2+ibcr) > 0.f) ? REAL(1.0) : REAL(-1.0);
+		for (i=0; i<3; i++) pb1[i] =psf[i]+ sign * B[ibcr] * R2[i*4+ibcr];
+		for (i=0; i<3; i++) pb2[i] =psf[i]- sign * B[ibcr] * R2[i*4+ibcr];
 
-  // compute center point of incident face, in reference-face coordinates
-  dVector3 center;
-  if (nr[lanr] < 0) {
-    for (i=0; i<3; i++) center[i] = pb[i] - pa[i] + Sb[lanr] * Rb[i*4+lanr];
-  }
-  else {
-    for (i=0; i<3; i++) center[i] = pb[i] - pa[i] - Sb[lanr] * Rb[i*4+lanr];
-  }
+		sign = (dDOT14(normal,R2+ibnx) > 0.f) ? REAL(1.0) : REAL(-1.0);
+		for (i=0; i<3; i++) pb3[i] =psf[i]+ sign * B[ibnx] * R2[i*4+ibnx];
+		*/
+		// find a point pb on the intersecting edge of box 2
+		dVector3 pb;
+		for (i=0; i<3; i++) pb[i] = p2[i];
+		for (j=0; j<3; j++) {
+			sign = (dDOT14(normal,R2+j) > 0.f) ? REAL(-1.0) : REAL(1.0);
+			for (i=0; i<3; i++) pb[i] += sign * B[j] * R2[i*4+j];
+		}
 
-  // find the normal and non-normal axis numbers of the reference box
-  int codeN,code1,code2;
-  if (code <= 3) codeN = code-1; else codeN = code-4;
-  if (codeN==0) {
-    code1 = 1;
-    code2 = 2;
-  }
-  else if (codeN==1) {
-    code1 = 0;
-    code2 = 2;
-  }
-  else {
-    code1 = 0;
-    code2 = 1;
-  }
+		dReal alpha,beta;
+		dVector3 ua,ub,pa0,pb0;
+		for (i=0; i<3; i++) ua[i] = R1[((code)-7)/3 + i*4];
+		for (i=0; i<3; i++) ub[i] = R2[((code)-7)%3 + i*4];
 
-  // find the four corners of the incident face, in reference-face coordinates
-  dReal quad[8];	// 2D coordinate of incident face (x,y pairs)
-  dReal c1,c2,m11,m12,m21,m22;
-  c1 = dDOT14 (center,Ra+code1);
-  c2 = dDOT14 (center,Ra+code2);
-  // optimize this? - we have already computed this data above, but it is not
-  // stored in an easy-to-index format. for now it's quicker just to recompute
-  // the four dot products.
-  m11 = dDOT44 (Ra+code1,Rb+a1);
-  m12 = dDOT44 (Ra+code1,Rb+a2);
-  m21 = dDOT44 (Ra+code2,Rb+a1);
-  m22 = dDOT44 (Ra+code2,Rb+a2);
-  {
-    dReal k1 = m11*Sb[a1];
-    dReal k2 = m21*Sb[a1];
-    dReal k3 = m12*Sb[a2];
-    dReal k4 = m22*Sb[a2];
-    quad[0] = c1 - k1 - k3;
-    quad[1] = c2 - k2 - k4;
-    quad[2] = c1 - k1 + k3;
-    quad[3] = c2 - k2 + k4;
-    quad[4] = c1 + k1 + k3;
-    quad[5] = c2 + k2 + k4;
-    quad[6] = c1 + k1 - k3;
-    quad[7] = c2 + k2 - k4;
-  }
+		dLineClosestApproach (pa,ua,pb,ub,&alpha,&beta);
+		for (i=0; i<3; i++) pa0[i] =pa[i]+ ua[i]*alpha;
+		for (i=0; i<3; i++) pb0[i] =pb[i]+ ub[i]*beta;
 
-  // find the size of the reference face
-  dReal rect[2];
-  rect[0] = Sa[code1];
-  rect[1] = Sa[code2];
+		for (i=0; i<3; i++) contact[0].pos[i] = REAL(0.5)*(pa0[i]+pb0[i]);
+		contact[0].depth = *depth;
 
-  // intersect the incident and reference faces
-  dReal ret[16];
-  int n = intersectRectQuad (rect,quad,ret);
-  if (n < 1) return 0;		// this should never happen
+		ret++;
 
-  // convert the intersection points into reference-face coordinates,
-  // and compute the contact position and depth for each point. only keep
-  // those points that have a positive (penetrating) depth. delete points in
-  // the 'ret' array as necessary so that 'point' and 'ret' correspond.
-  dReal point[3*8];		// penetrating contact points
-  dReal dep[8];			// depths for those points
-  dReal det1 = dRecip(m11*m22 - m12*m21);
-  m11 *= det1;
-  m12 *= det1;
-  m21 *= det1;
-  m22 *= det1;
-  int cnum = 0;			// number of penetrating contact points found
-  for (j=0; j < n; j++) {
-    dReal k1 =  m22*(ret[j*2]-c1) - m12*(ret[j*2+1]-c2);
-    dReal k2 = -m21*(ret[j*2]-c1) + m11*(ret[j*2+1]-c2);
-    for (i=0; i<3; i++) point[cnum*3+i] =
-			  center[i] + k1*Rb[i*4+a1] + k2*Rb[i*4+a2];
-    dep[cnum] = Sa[codeN] - dDOT(normal2,point+cnum*3);
-    if (dep[cnum] >= 0) {
-      ret[cnum*2] = ret[j*2];
-      ret[cnum*2+1] = ret[j*2+1];
-      cnum++;
-    }
-  }
-  if (cnum < 1) return 0;	// this should never happen
 
-  // we can't generate more contacts than we actually have
-  if (maxc > cnum) maxc = cnum;
-  if (maxc < 1) maxc = 1;
 
-  if (cnum <= maxc) {
-    // we have less contacts than we need, so we use them all
-    for (j=0; j < cnum; j++) {
-      dContactGeom *con = CONTACT(contact,skip*j);
-      for (i=0; i<3; i++) con->pos[i] = point[j*3+i] + pa[i];
-      con->depth = dep[j];
-    }
-  }
-  else {
-    // we have more contacts than are wanted, some of them must be culled.
-    // find the deepest point, it is always the first contact.
-    int i1 = 0;
-    dReal maxdepth = dep[0];
-    for (i=1; i<cnum; i++) {
-      if (dep[i] > maxdepth) {
-	maxdepth = dep[i];
-	i1 = i;
-      }
-    }
+		dVector3 dif;
+		for (i=0; i<3; i++) dif[i]=p2[i]-pa0[i];
+		sign = (dDOT14(dif,R2+ibnx) > 0.f) ? REAL(1.0) : REAL(-1.0);
 
-    int iret[8];
-    cullPoints (cnum,ret,maxc,i1,iret);
+		if(CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibnx,sign,pb1))
+		{
+			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pb1[i];
+			for (i=0; i<3; i++) dif[i]=pb1[i]-pa0[i];
+			CONTACT(contact,skip*ret)->depth=*depth-dFabs(dDOT41(R2+ibmx,dif)*dDOT41(R2+ibmx,normal));
+			if(CONTACT(contact,skip*ret)->depth>0.f) 
+				ret++;
+		}
 
-    for (j=0; j < maxc; j++) {
-      dContactGeom *con = CONTACT(contact,skip*j);
-      for (i=0; i<3; i++) con->pos[i] = point[iret[j]*3+i] + pa[i];
-      con->depth = dep[iret[j]];
-    }
-    cnum = maxc;
-  }
 
-  *return_code = code;
-  return cnum;
+		if(CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibcr,1,pb2))
+		{
+			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pb2[i];
+			for (i=0; i<3; i++) dif[i]=pb2[i]-pa0[i];
+			CONTACT(contact,skip*ret)->depth=*depth-dFabs(dDOT41(R2+ibmx,dif)*dDOT41(R2+ibmx,normal));
+			if(CONTACT(contact,skip*ret)->depth>0.f) 
+				ret++;
+		}
+
+
+		if(CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibcr,-1,pb3))
+		{
+			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pb3[i];
+			for (i=0; i<3; i++) dif[i]=pb3[i]-pa0[i];
+			CONTACT(contact,skip*ret)->depth=*depth-dFabs(dDOT41(R2+ibmx,dif)*dDOT41(R2+ibmx,normal));
+			if(CONTACT(contact,skip*ret)->depth>0.f) 
+				ret++;
+		}
+
+
+
+		for (i=0; i<3; i++) dif[i]=p1[i]-pb0[i];
+		sign = (dDOT14(dif,R1+ianx) > 0.f) ? REAL(1.0) : REAL(-1.0);
+		if(CrossBoxSide44(pb0,R2,ibcr,p1,R1,side1,ianx,sign,pa1))
+		{
+			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pa1[i];
+			for (i=0; i<3; i++) dif[i]=pa1[i]-pb0[i];
+			CONTACT(contact,skip*ret)->depth=*depth-dFabs(dDOT41(R1+iamx,dif)*dDOT41(R1+iamx,normal));
+			if(CONTACT(contact,skip*ret)->depth>0.f) 
+				ret++;
+		}
+
+
+		if(CrossBoxSide44(pb0,R2,ibcr,p2,R1,side1,iacr,1,pa2))
+		{
+			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pa2[i];
+			for (i=0; i<3; i++) dif[i]=pa2[i]-pb0[i];
+			CONTACT(contact,skip*ret)->depth=*depth-dFabs(dDOT41(R1+iamx,dif)*dDOT41(R1+iamx,normal));
+			if(CONTACT(contact,skip*ret)->depth>0.f) 
+				ret++;
+		}
+
+
+		if(CrossBoxSide44(pb0,R2,ibcr,p2,R1,side1,iacr,-1,pa3))
+		{
+			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pa3[i];
+			for (i=0; i<3; i++) dif[i]=pa3[i]-pb0[i];
+			CONTACT(contact,skip*ret)->depth=*depth-dFabs(dDOT41(R1+iamx,dif)*dDOT41(R1+iamx,normal));
+			if(CONTACT(contact,skip*ret)->depth>0.f) 
+				ret++;
+		}
+		*return_code = code;
+		return ret;
+	}
+
+	// okay, we have a face-something intersection (because the separating
+	// axis is perpendicular to a face). define face 'a' to be the reference
+	// face (i.e. the normal vector is perpendicular to this) and face 'b' to be
+	// the incident face (the closest face of the other box).
+
+	const dReal *Ra,*Rb,*pa,*pb,*Sa,*Sb;
+	if (code <= 3) {
+		Ra = R1;
+		Rb = R2;
+		pa = p1;
+		pb = p2;
+		Sa = A;
+		Sb = B;
+	}
+	else {
+		Ra = R2;
+		Rb = R1;
+		pa = p2;
+		pb = p1;
+		Sa = B;
+		Sb = A;
+	}
+
+	// nr = normal vector of reference face dotted with axes of incident box.
+	// anr = absolute values of nr.
+	dVector3 normal2,nr,anr;
+	if (code <= 3) {
+		normal2[0] = normal[0];
+		normal2[1] = normal[1];
+		normal2[2] = normal[2];
+	}
+	else {
+		normal2[0] = -normal[0];
+		normal2[1] = -normal[1];
+		normal2[2] = -normal[2];
+	}
+	dMULTIPLY1_331 (nr,Rb,normal2);
+	anr[0] = dFabs (nr[0]);
+	anr[1] = dFabs (nr[1]);
+	anr[2] = dFabs (nr[2]);
+
+	// find the largest compontent of anr: this corresponds to the normal
+	// for the indident face. the other axis numbers of the indicent face
+	// are stored in a1,a2.
+	int lanr,a1,a2;
+	if (anr[1] > anr[0]) {
+		if (anr[1] > anr[2]) {
+			a1 = 0;
+			lanr = 1;
+			a2 = 2;
+		}
+		else {
+			a1 = 0;
+			a2 = 1;
+			lanr = 2;
+		}
+	}
+	else {
+		if (anr[0] > anr[2]) {
+			lanr = 0;
+			a1 = 1;
+			a2 = 2;
+		}
+		else {
+			a1 = 0;
+			a2 = 1;
+			lanr = 2;
+		}
+	}
+
+	// compute center point of incident face, in reference-face coordinates
+	dVector3 center;
+	if (nr[lanr] < 0) {
+		for (i=0; i<3; i++) center[i] = pb[i] - pa[i] + Sb[lanr] * Rb[i*4+lanr];
+	}
+	else {
+		for (i=0; i<3; i++) center[i] = pb[i] - pa[i] - Sb[lanr] * Rb[i*4+lanr];
+	}
+
+	// find the normal and non-normal axis numbers of the reference box
+	int codeN,code1,code2;
+	if (code <= 3) codeN = code-1; else codeN = code-4;
+	if (codeN==0) {
+		code1 = 1;
+		code2 = 2;
+	}
+	else if (codeN==1) {
+		code1 = 0;
+		code2 = 2;
+	}
+	else {
+		code1 = 0;
+		code2 = 1;
+	}
+
+	// find the four corners of the incident face, in reference-face coordinates
+	dReal quad[8];	// 2D coordinate of incident face (x,y pairs)
+	dReal c1,c2,m11,m12,m21,m22;
+	c1 = dDOT14 (center,Ra+code1);
+	c2 = dDOT14 (center,Ra+code2);
+	// optimize this? - we have already computed this data above, but it is not
+	// stored in an easy-to-index format. for now it's quicker just to recompute
+	// the four dot products.
+	m11 = dDOT44 (Ra+code1,Rb+a1);
+	m12 = dDOT44 (Ra+code1,Rb+a2);
+	m21 = dDOT44 (Ra+code2,Rb+a1);
+	m22 = dDOT44 (Ra+code2,Rb+a2);
+	{
+		dReal k1 = m11*Sb[a1];
+		dReal k2 = m21*Sb[a1];
+		dReal k3 = m12*Sb[a2];
+		dReal k4 = m22*Sb[a2];
+		quad[0] = c1 - k1 - k3;
+		quad[1] = c2 - k2 - k4;
+		quad[2] = c1 - k1 + k3;
+		quad[3] = c2 - k2 + k4;
+		quad[4] = c1 + k1 + k3;
+		quad[5] = c2 + k2 + k4;
+		quad[6] = c1 + k1 - k3;
+		quad[7] = c2 + k2 - k4;
+	}
+
+	// find the size of the reference face
+	dReal rect[2];
+	rect[0] = Sa[code1];
+	rect[1] = Sa[code2];
+
+	// intersect the incident and reference faces
+	dReal ret[16];
+	int n = intersectRectQuad (rect,quad,ret);
+	if (n < 1) return 0;		// this should never happen
+
+	// convert the intersection points into reference-face coordinates,
+	// and compute the contact position and depth for each point. only keep
+	// those points that have a positive (penetrating) depth. delete points in
+	// the 'ret' array as necessary so that 'point' and 'ret' correspond.
+	dReal point[3*8];		// penetrating contact points
+	dReal dep[8];			// depths for those points
+	dReal det1 = dRecip(m11*m22 - m12*m21);
+	m11 *= det1;
+	m12 *= det1;
+	m21 *= det1;
+	m22 *= det1;
+	int cnum = 0;			// number of penetrating contact points found
+	for (j=0; j < n; j++) {
+		dReal k1 =  m22*(ret[j*2]-c1) - m12*(ret[j*2+1]-c2);
+		dReal k2 = -m21*(ret[j*2]-c1) + m11*(ret[j*2+1]-c2);
+		for (i=0; i<3; i++) point[cnum*3+i] =
+			center[i] + k1*Rb[i*4+a1] + k2*Rb[i*4+a2];
+		dep[cnum] = Sa[codeN] - dDOT(normal2,point+cnum*3);
+		if (dep[cnum] >= 0) {
+			ret[cnum*2] = ret[j*2];
+			ret[cnum*2+1] = ret[j*2+1];
+			cnum++;
+		}
+	}
+	if (cnum < 1) return 0;	// this should never happen
+
+	// we can't generate more contacts than we actually have
+	if (maxc > cnum) maxc = cnum;
+	if (maxc < 1) maxc = 1;
+
+	if (cnum <= maxc) {
+		// we have less contacts than we need, so we use them all
+		for (j=0; j < cnum; j++) {
+			dContactGeom *con = CONTACT(contact,skip*j);
+			for (i=0; i<3; i++) con->pos[i] = point[j*3+i] + pa[i];
+			con->depth = dep[j];
+		}
+	}
+	else {
+		// we have more contacts than are wanted, some of them must be culled.
+		// find the deepest point, it is always the first contact.
+		int i1 = 0;
+		dReal maxdepth = dep[0];
+		for (i=1; i<cnum; i++) {
+			if (dep[i] > maxdepth) {
+				maxdepth = dep[i];
+				i1 = i;
+			}
+		}
+
+		int iret[8];
+		cullPoints (cnum,ret,maxc,i1,iret);
+
+		for (j=0; j < maxc; j++) {
+			dContactGeom *con = CONTACT(contact,skip*j);
+			for (i=0; i<3; i++) con->pos[i] = point[iret[j]*3+i] + pa[i];
+			con->depth = dep[iret[j]];
+		}
+		cnum = maxc;
+	}
+
+	*return_code = code;
+	return cnum;
 }
 
 //****************************************************************************
@@ -1562,7 +1786,7 @@ static int ray_sphere_helper (dxRay *ray, dVector3 sphere_pos, dReal radius,
   contact->pos[0] = ray->pos[0] + alpha*ray->R[0*4+2];
   contact->pos[1] = ray->pos[1] + alpha*ray->R[1*4+2];
   contact->pos[2] = ray->pos[2] + alpha*ray->R[2*4+2];
-  dReal nsign = (C < 0 || mode) ? REAL(-1.0) : REAL(1.0);
+  dReal nsign = (C < 0 || mode) ? -1.0 : 1.0;
   contact->normal[0] = nsign*(contact->pos[0] - sphere_pos[0]);
   contact->normal[1] = nsign*(contact->pos[1] - sphere_pos[1]);
   contact->normal[2] = nsign*(contact->pos[2] - sphere_pos[2]);
@@ -1686,7 +1910,7 @@ int dCollideRayCCylinder (dxGeom *o1, dxGeom *o2,
 {
   dIASSERT (skip >= (int)sizeof(dContactGeom));
   dIASSERT (o1->type == dRayClass);
-  dIASSERT (o2->type == dCCylinderClass);
+//  dIASSERT (o2->type == dCCylinderClass);
   dxRay *ray = (dxRay*) o1;
   dxCCylinder *ccyl = (dxCCylinder*) o2;
 
@@ -1763,7 +1987,7 @@ int dCollideRayCCylinder (dxGeom *o1, dxGeom *o2,
       q[1] = contact->pos[1] - ccyl->pos[1];
       q[2] = contact->pos[2] - ccyl->pos[2];
       k = dDOT14(q,ccyl->R+2);
-      dReal nsign = inside_ccyl ? REAL(-1.0) : REAL(1.0);
+      dReal nsign = inside_ccyl ? -1.0 : 1.0;
       if (k >= -lz2 && k <= lz2) {
 	contact->normal[0] = nsign * (contact->pos[0] -
 				      (ccyl->pos[0] + k*ccyl->R[0*4+2]));
@@ -1802,7 +2026,7 @@ int dCollideRayPlane (dxGeom *o1, dxGeom *o2, int flags,
 
   dReal alpha = plane->p[3] - dDOT (plane->p,ray->pos);
   // note: if alpha > 0 the starting point is below the plane
-  dReal nsign = (alpha > 0) ? REAL(-1.0) : REAL(1.0);
+  dReal nsign = (alpha > 0) ? -1.0 : 1.0;
   dReal k = dDOT14(plane->p,ray->R+2);
   if (k==0) return 0;		// ray parallel to plane
   alpha /= k;

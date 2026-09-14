@@ -51,9 +51,9 @@ dMessageFunction *dGetDebugHandler();
 dMessageFunction *dGetMessageHandler();
 
 /* generate a fatal error, debug trap or a message. */
-void dError (int num, const char *msg, ...);
-void dDebug (int num, const char *msg, ...);
-void dMessage (int num, const char *msg, ...);
+void _cdecl dError (int num, const char *msg, ...);
+void _cdecl dDebug (int num, const char *msg, ...);
+void _cdecl dMessage (int num, const char *msg, ...);
 
 
 #ifdef __cplusplus
