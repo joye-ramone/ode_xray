@@ -23,9 +23,9 @@
 #ifndef _ODE_OBJECTS_H_
 #define _ODE_OBJECTS_H_
 
-#include "common.h"
-#include "mass.h"
-#include "contact.h"
+#include <ode/common.h>
+#include <ode/mass.h>
+#include <ode/contact.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -22,7 +22,7 @@
 
 #include <ode/common.h>
 #include <ode/odemath.h>
-#include <float.h>
+
 #include <cmath>
 
 // this may be called for vectors `a' with extremely small magnitude, for

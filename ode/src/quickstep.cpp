@@ -31,7 +31,6 @@
 #include <ode/misc.h>
 #include "lcp.h"
 #include "util.h"
-#include "stdlib.h"
 
 #include <algorithm>
 #include <random>

@@ -28,6 +28,8 @@
 // Note that this source file duplicates a lot of stuff from step.cpp,
 // eventually we should move the common code to a third file.
 
+#include <cstdlib>
+
 #include "objects.h"
 #include "joint.h"
 #include <ode/config.h>
@@ -39,7 +41,6 @@
 #include <ode/matrix.h>
 #include "lcp.h"
 #include "step.h"
-#include <stdlib.h>
 
 #include "StepJointInternal.h"
 // misc defines
@@ -729,7 +730,7 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 		//and swapping the current joint pointer with a random one before it.
 		for (j = 1; j < nj; j++)
 		{
-			int r = rand () % (j+1);
+			int r = std::rand () % (j+1);
 			SwapJoints(j,r,joints,info,Jinfo);
 		}
 		
