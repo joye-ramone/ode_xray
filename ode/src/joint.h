@@ -110,7 +110,6 @@ struct dxJoint : public dObject {
   typedef void init_fn (dxJoint *joint);
   typedef void getInfo1_fn (dxJoint *joint, Info1 *info);
   typedef void getInfo2_fn (dxJoint *joint, Info2 *info);
-  typedef void addBodiesForces_fn(dxJoint *joint);
   struct Vtable {
     int size;
     init_fn *init;

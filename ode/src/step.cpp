@@ -71,7 +71,7 @@ static void Multiply2_p8r (dReal *A, dReal *B, dReal *C,
       sum += bb[4]*cc[4];
       sum += bb[5]*cc[5];
       sum += bb[6]*cc[6];
-      *(A++) = sum; 
+      *(A++) = sum;
       cc += 8;
     }
     A += Askip - r;
@@ -98,7 +98,7 @@ static void MultiplyAdd2_p8r (dReal *A, dReal *B, dReal *C,
       sum += bb[4]*cc[4];
       sum += bb[5]*cc[5];
       sum += bb[6]*cc[6];
-      *(A++) += sum; 
+      *(A++) += sum;
       cc += 8;
     }
     A += Askip - r;
@@ -936,8 +936,8 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
 		if(!dValid(af))af=0.f;
 		body[i]->lvel[j] += body_invMass * cforce[i*8+j];
 	}
-		dMULTIPLYADD0_331 (body[i]->avel,body_invI,cforce+i*8+4);
-	
+	dMULTIPLYADD0_331 (body[i]->avel,body_invI,cforce+i*8+4);
+
   }
 
   // update the position and orientation from the new linear/angular velocity
