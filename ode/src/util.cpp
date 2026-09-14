@@ -38,7 +38,7 @@ void dInternalHandleAutoDisabling (dxWorld *world, dReal stepsize)
 		// nothing to do unless this body is currently enabled and has
 		// the auto-disable flag set
 		if ((bb->flags & (dxBodyAutoDisable|dxBodyDisabled)) != dxBodyAutoDisable) continue;
-		
+
 		// see if the body is idle
 		int idle = 1;			// initial assumption
 		dReal lspeed2 = dDOT(bb->lvel,bb->lvel);
@@ -51,7 +51,7 @@ void dInternalHandleAutoDisabling (dxWorld *world, dReal stepsize)
 				idle = 0;	// turning fast - not idle
 			}
 		}
-	
+
 		// if it's idle, accumulate steps and time.
 		// these counters won't overflow because this code doesn't run for disabled bodies.
 		if (idle) {
@@ -169,12 +169,6 @@ dIASSERT(dValid(b->avel[0])&&dValid(b->avel[1])&&dValid(b->avel[2]));
 #ifdef DEBUG_VALID
 dIASSERT(dValid(b->avel[0])&&dValid(b->avel[1])&&dValid(b->avel[2]));
 #endif
-
-
-
-
-
-
 }
 
 //****************************************************************************
@@ -203,7 +197,7 @@ void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper)
 
   // handle auto-disabling of bodies
   dInternalHandleAutoDisabling (world,stepsize);
-  
+
   // make arrays for body and joint lists (for a single island) to go into
   body = (dxBody**) ALLOCA (world->nb * sizeof(dxBody*));
   joint = (dxJoint**) ALLOCA (world->nj * sizeof(dxJoint*));

@@ -594,17 +594,6 @@ int dxJointLimitMotor::addLimot (dxJoint *joint,
     }
 
     if (limit) {
-	  //dReal l_limit_error;
-	  //if(limit==1) 
-	  //{
-		 // l_limit_error=limit_err+min_stop_err;
-		 // if(l_limit_error>0.f) l_limit_error=0.f;
-	  //}
-	  //else
-	  //{
-		 // l_limit_error=limit_err-min_stop_err;
-		 // if(l_limit_error<0.f) l_limit_error=0.f;
-	  //}
       dReal k = info->fps * stop_erp;
       info->c[row] = -k * limit_err;
       info->cfm[row] = stop_cfm;
@@ -726,8 +715,7 @@ dxJoint::Vtable __dball_vtable = {
   (dxJoint::init_fn*) ballInit,
   (dxJoint::getInfo1_fn*) ballGetInfo1,
   (dxJoint::getInfo2_fn*) ballGetInfo2,
-  dJointTypeBall
-};
+  dJointTypeBall};
 
 //****************************************************************************
 // hinge
@@ -1015,8 +1003,7 @@ dxJoint::Vtable __dhinge_vtable = {
   (dxJoint::init_fn*) hingeInit,
   (dxJoint::getInfo1_fn*) hingeGetInfo1,
   (dxJoint::getInfo2_fn*) hingeGetInfo2,
-  dJointTypeHinge
-};
+  dJointTypeHinge};
 
 //****************************************************************************
 // slider
@@ -1251,8 +1238,7 @@ dxJoint::Vtable __dslider_vtable = {
   (dxJoint::init_fn*) sliderInit,
   (dxJoint::getInfo1_fn*) sliderGetInfo1,
   (dxJoint::getInfo2_fn*) sliderGetInfo2,
-  dJointTypeSlider
-};
+  dJointTypeSlider};
 
 //****************************************************************************
 // contact
@@ -1451,8 +1437,7 @@ dxJoint::Vtable __dcontact_vtable = {
   (dxJoint::init_fn*) contactInit,
   (dxJoint::getInfo1_fn*) contactGetInfo1,
   (dxJoint::getInfo2_fn*) contactGetInfo2,
-  dJointTypeContact
-};
+  dJointTypeContact};
 
 dxJoint::Vtable __dcontact_special_vtable = {
 	sizeof(dxJointContact),
@@ -1812,8 +1797,7 @@ dxJoint::Vtable __dhinge2_vtable = {
   (dxJoint::init_fn*) hinge2Init,
   (dxJoint::getInfo1_fn*) hinge2GetInfo1,
   (dxJoint::getInfo2_fn*) hinge2GetInfo2,
-  dJointTypeHinge2
-};
+  dJointTypeHinge2};
 
 //****************************************************************************
 // universal
@@ -2270,8 +2254,7 @@ dxJoint::Vtable __duniversal_vtable = {
   (dxJoint::init_fn*) universalInit,
   (dxJoint::getInfo1_fn*) universalGetInfo1,
   (dxJoint::getInfo2_fn*) universalGetInfo2,
-  dJointTypeUniversal
-};
+  dJointTypeUniversal};
 
 //****************************************************************************
 // angular motor
@@ -2670,8 +2653,7 @@ dxJoint::Vtable __damotor_vtable = {
   (dxJoint::init_fn*) amotorInit,
   (dxJoint::getInfo1_fn*) amotorGetInfo1,
   (dxJoint::getInfo2_fn*) amotorGetInfo2,
-  dJointTypeAMotor
-};
+  dJointTypeAMotor};
 
 //****************************************************************************
 // fixed joint
@@ -2783,8 +2765,7 @@ dxJoint::Vtable __dfixed_vtable = {
   (dxJoint::init_fn*) fixedInit,
   (dxJoint::getInfo1_fn*) fixedGetInfo1,
   (dxJoint::getInfo2_fn*) fixedGetInfo2,
-  dJointTypeFixed
-};
+  dJointTypeFixed};
 
 //****************************************************************************
 // null joint
@@ -2807,5 +2788,4 @@ dxJoint::Vtable __dnull_vtable = {
   (dxJoint::init_fn*) 0,
   (dxJoint::getInfo1_fn*) nullGetInfo1,
   (dxJoint::getInfo2_fn*) nullGetInfo2,
-  dJointTypeNull
-};
+  dJointTypeNull};
