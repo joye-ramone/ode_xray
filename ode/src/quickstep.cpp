@@ -31,6 +31,10 @@
 #include <ode/misc.h>
 #include "lcp.h"
 #include "util.h"
+#include "stdlib.h"
+
+#include <algorithm>
+#include <random>
 
 #define ALLOCA dALLOCA16
 
@@ -47,7 +51,7 @@ typedef dReal *dRealMutablePtr;
 // help for motor-driven joints. unfortunately it appears to hurt
 // with high-friction contacts using the SOR method. use with care
 
-#define WARM_STARTING 1
+ #define WARM_STARTING 0
 
 
 // for the SOR method:
@@ -152,7 +156,7 @@ static void multiply_J (int m, dRealMutablePtr J, int *jb,
 
 // compute out = (J*inv(M)*J' + cfm)*in.
 // use z as an nb*6 temporary.
-
+/*
 static void multiply_J_invM_JT (int m, int nb, dRealMutablePtr J, dRealMutablePtr iMJ, int *jb,
 	dRealPtr cfm, dRealMutablePtr z, dRealMutablePtr in, dRealMutablePtr out)
 {
@@ -162,6 +166,7 @@ static void multiply_J_invM_JT (int m, int nb, dRealMutablePtr J, dRealMutablePt
 	// add cfm
 	for (int i=0; i<m; i++) out[i] += cfm[i] * in[i];
 }
+*/
 
 //***************************************************************************
 // conjugate gradient method with jacobi preconditioner
@@ -294,7 +299,7 @@ struct IndexError {
 
 #ifdef REORDER_CONSTRAINTS
 
-static int compare_index_error (const void *a, const void *b)
+static  __cdecl  int compare_index_error (const void *a, const void *b)
 {
 	const IndexError *i1 = (IndexError*) a;
 	const IndexError *i2 = (IndexError*) b;
@@ -307,11 +312,12 @@ static int compare_index_error (const void *a, const void *b)
 
 #endif
 
+static thread_local auto rng = std::mt19937(std::random_device()());
 
 static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *body,
-	dRealPtr invI, dRealMutablePtr lambda, dRealMutablePtr fc, dRealMutablePtr b,
-	dRealMutablePtr lo, dRealMutablePtr hi, dRealPtr cfm, int *findex,
-	dxQuickStepParameters *qs)
+					 dRealPtr invI, dRealMutablePtr lambda, dRealMutablePtr fc, dRealMutablePtr b,
+					 dRealMutablePtr lo, dRealMutablePtr hi, dRealPtr cfm, int *findex,
+					 dxQuickStepParameters *qs)
 {
 	const int num_iterations = qs->num_iterations;
 	const dReal sor_w = qs->w;		// SOR over-relaxation parameter
@@ -321,7 +327,7 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 #ifdef WARM_STARTING
 	// for warm starting, this seems to be necessary to prevent
 	// jerkiness in motor-driven joints. i have no idea why this works.
-	for (i=0; i<m; i++) lambda[i] *= 0.9;
+	for (i=0; i<m; i++) lambda[i] *= REAL(0.9);
 #else
 	dSetZero (lambda,m);
 #endif
@@ -348,6 +354,220 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 
 	// precompute 1 / diagonals of A
 	dRealAllocaArray (Ad,m);
+	dRealPtr iMJ_ptr = iMJ;
+	dRealMutablePtr J_ptr = J;
+	for (i=0; i<m; i++) {
+		dReal sum = 0;
+		for (j=0; j<6; j++) sum += iMJ_ptr[j] * J_ptr[j];
+		if (jb[i*2+1] >= 0) {
+			for (j=6; j<12; j++) sum += iMJ_ptr[j] * J_ptr[j];
+		}
+		iMJ_ptr += 12;
+		J_ptr += 12;
+		Ad[i] = sor_w / (sum + cfm[i]);
+	}
+
+	// scale J and b by Ad
+	J_ptr = J;
+	for (i=0; i<m; i++) {
+		for (j=0; j<12; j++) {
+			J_ptr[0] *= Ad[i];
+			J_ptr++;
+		}
+		b[i] *= Ad[i];
+	}
+
+	// scale Ad by CFM
+	for (i=0; i<m; i++) Ad[i] *= cfm[i];
+
+	// order to solve constraint rows in
+	IndexError *order = (IndexError*) alloca (m*sizeof(IndexError));
+
+#ifndef REORDER_CONSTRAINTS
+	// make sure constraints with findex < 0 come first.
+	j=0;
+	for (i=0; i<m; i++) if (findex[i] < 0) order[j++].index = i;
+	for (i=0; i<m; i++) if (findex[i] >= 0) order[j++].index = i;
+	dIASSERT (j==m);
+#endif
+
+	for (int iteration=0; iteration < num_iterations; iteration++) {
+
+#ifdef REORDER_CONSTRAINTS
+		// constraints with findex < 0 always come first.
+		if (iteration < 2) {
+			// for the first two iterations, solve the constraints in
+			// the given order
+			for (i=0; i<m; i++) {
+				order[i].error = i;
+				order[i].findex = findex[i];
+				order[i].index = i;
+			}
+		}
+		else {
+			// sort the constraints so that the ones converging slowest
+			// get solved last. use the absolute (not relative) error.
+			for (i=0; i<m; i++) {
+				dReal v1 = dFabs (lambda[i]);
+				dReal v2 = dFabs (last_lambda[i]);
+				dReal max = (v1 > v2) ? v1 : v2;
+				if (max > 0) {
+					//@@@ relative error: order[i].error = dFabs(lambda[i]-last_lambda[i])/max;
+					order[i].error = dFabs(lambda[i]-last_lambda[i]);
+				}
+				else {
+					order[i].error = dInfinity;
+				}
+				order[i].findex = findex[i];
+				order[i].index = i;
+			}
+		}
+		qsort (order,m,sizeof(IndexError),&compare_index_error);
+#endif
+#ifdef RANDOMLY_REORDER_CONSTRAINTS
+		if ((iteration & 3) == 0) {
+			std::shuffle(order, order + m, rng);
+			/*
+			for (i=1; i<m; ++i) {
+				IndexError tmp = order[i];
+				int swapi = dRandInt(i+1);
+				order[i] = order[swapi];
+				order[swapi] = tmp;
+			}
+			*/
+		}
+#endif
+
+		//@@@ potential optimization: swap lambda and last_lambda pointers rather
+		//    than copying the data. we must make sure lambda is properly
+		//    returned to the caller
+		memcpy (last_lambda,lambda,m*sizeof(dReal));
+
+		for (int i=0; i<m; i++) {
+			// @@@ potential optimization: we could pre-sort J and iMJ, thereby
+			//     linearizing access to those arrays. hmmm, this does not seem
+			//     like a win, but we should think carefully about our memory
+			//     access pattern.
+
+			int index = order[i].index;
+			J_ptr = J + index*12;
+			iMJ_ptr = iMJ + index*12;
+
+			// set the limits for this constraint. note that 'hicopy' is used.
+			// this is the place where the QuickStep method differs from the
+			// direct LCP solving method, since that method only performs this
+			// limit adjustment once per time step, whereas this method performs
+			// once per iteration per constraint row.
+			// the constraints are ordered so that all lambda[] values needed have
+			// already been computed.
+			if (findex[index] >= 0) {
+				hi[index] = dFabs (hicopy[index] * lambda[findex[index]]);
+				lo[index] = -hi[index];
+			}
+
+			int b1 = jb[index*2];
+			int b2 = jb[index*2+1];
+			dReal delta = b[index] - lambda[index]*Ad[index];
+			dRealMutablePtr fc_ptr = fc + 6*b1;
+
+			// @@@ potential optimization: SIMD-ize this and the b2 >= 0 case
+			delta -=fc_ptr[0] * J_ptr[0] + fc_ptr[1] * J_ptr[1] +
+				fc_ptr[2] * J_ptr[2] + fc_ptr[3] * J_ptr[3] +
+				fc_ptr[4] * J_ptr[4] + fc_ptr[5] * J_ptr[5];
+			// @@@ potential optimization: handle 1-body constraints in a separate
+			//     loop to avoid the cost of test & jump?
+			if (b2 >= 0) {
+				fc_ptr = fc + 6*b2;
+				delta -=fc_ptr[0] * J_ptr[6] + fc_ptr[1] * J_ptr[7] +
+					fc_ptr[2] * J_ptr[8] + fc_ptr[3] * J_ptr[9] +
+					fc_ptr[4] * J_ptr[10] + fc_ptr[5] * J_ptr[11];
+			}
+
+			// compute lambda and clamp it to [lo,hi].
+			// @@@ potential optimization: does SSE have clamping instructions
+			//     to save test+jump penalties here?
+			dReal new_lambda = lambda[index] + delta;
+			if (new_lambda < lo[index] && !isnan(lo[index])) {
+				delta = lo[index]-lambda[index];
+				lambda[index] = lo[index];
+			}
+			else if (new_lambda > hi[index]) {
+				delta = hi[index]-lambda[index];
+				lambda[index] = hi[index];
+			}
+			else {
+				lambda[index] = new_lambda;
+			}
+
+			//@@@ a trick that may or may not help
+			//dReal ramp = (1-((dReal)(iteration+1)/(dReal)num_iterations));
+			//delta *= ramp;
+
+			// update fc.
+			// @@@ potential optimization: SIMD for this and the b2 >= 0 case
+			fc_ptr = fc + 6*b1;
+			fc_ptr[0] += delta * iMJ_ptr[0];
+			fc_ptr[1] += delta * iMJ_ptr[1];
+			fc_ptr[2] += delta * iMJ_ptr[2];
+			fc_ptr[3] += delta * iMJ_ptr[3];
+			fc_ptr[4] += delta * iMJ_ptr[4];
+			fc_ptr[5] += delta * iMJ_ptr[5];
+			// @@@ potential optimization: handle 1-body constraints in a separate
+			//     loop to avoid the cost of test & jump?
+			if (b2 >= 0) {
+				fc_ptr = fc + 6*b2;
+				fc_ptr[0] += delta * iMJ_ptr[6];
+				fc_ptr[1] += delta * iMJ_ptr[7];
+				fc_ptr[2] += delta * iMJ_ptr[8];
+				fc_ptr[3] += delta * iMJ_ptr[9];
+				fc_ptr[4] += delta * iMJ_ptr[10];
+				fc_ptr[5] += delta * iMJ_ptr[11];
+			}
+		}
+	}
+}
+/*
+static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *body,
+	dRealPtr invI, dRealMutablePtr lambda, dRealMutablePtr fc, dRealMutablePtr b,
+	dRealMutablePtr lo, dRealMutablePtr hi, dRealPtr cfm, int *findex,
+	dxQuickStepParameters *qs)
+{
+	const int num_iterations = qs->num_iterations;
+	const dReal sor_w = qs->w;		// SOR over-relaxation parameter
+	
+	int i,j;
+
+#ifdef WARM_STARTING
+	// for warm starting, this seems to be necessary to prevent
+	// jerkiness in motor-driven joints. i have no idea why this works.
+	for (i=0; i<m; i++) lambda[i] *= 0.9;//0.68f;
+#else
+	dSetZero (lambda,m);
+#endif
+
+	// the lambda computed at the previous iteration.
+	// this is used to measure error for when we are reordering the indexes.
+	dRealAllocaArray (last_lambda,m);
+
+	// a copy of the 'hi' vector in case findex[] is being used
+	dRealAllocaArray (hicopy,m);
+	memcpy (hicopy,hi,m*sizeof(dReal));
+
+	// precompute iMJ = inv(M)*J'
+	dRealAllocaArray (iMJ,m*12);
+	compute_invM_JT (m,J,iMJ,jb,body,invI);
+
+	// compute fc=(inv(M)*J')*lambda. we will incrementally maintain fc
+	// as we change lambda.
+#ifdef WARM_STARTING
+	multiply_invM_JT (m,nb,iMJ,jb,lambda,fc);
+#else
+	dSetZero (fc,nb*6);
+#endif
+
+	// precompute 1 / diagonals of A
+	dRealAllocaArray (Ad,m);
+	dRealAllocaArray (delta_lambda,m);
 	dRealPtr iMJ_ptr = iMJ;
 	dRealMutablePtr J_ptr = J;
 	for (i=0; i<m; i++) {
@@ -451,10 +671,7 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 			// once per iteration per constraint row.
 			// the constraints are ordered so that all lambda[] values needed have
 			// already been computed.
-			if (findex[index] >= 0) {
-				hi[index] = dFabs (hicopy[index] * lambda[findex[index]]);
-				lo[index] = -hi[index];
-			}
+
 
 			int b1 = jb[index*2];
 			int b2 = jb[index*2+1];
@@ -477,51 +694,71 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 			// compute lambda and clamp it to [lo,hi].
 			// @@@ potential optimization: does SSE have clamping instructions
 			//     to save test+jump penalties here?
-			dReal new_lambda = lambda[index] + delta;
-			if (new_lambda < lo[index]) {
-				delta = lo[index]-lambda[index];
-				lambda[index] = lo[index];
-			}
-			else if (new_lambda > hi[index]) {
-				delta = hi[index]-lambda[index];
-				lambda[index] = hi[index];
-			}
-			else {
-				lambda[index] = new_lambda;
-			}
 
+			delta_lambda[index]=delta;
 			//@@@ a trick that may or may not help
 			//dReal ramp = (1-((dReal)(iteration+1)/(dReal)num_iterations));
 			//delta *= ramp;
 		
 			// update fc.
 			// @@@ potential optimization: SIMD for this and the b2 >= 0 case
-			fc_ptr = fc + 6*b1;
-			fc_ptr[0] += delta * iMJ_ptr[0];
-			fc_ptr[1] += delta * iMJ_ptr[1];
-			fc_ptr[2] += delta * iMJ_ptr[2];
-			fc_ptr[3] += delta * iMJ_ptr[3];
-			fc_ptr[4] += delta * iMJ_ptr[4];
-			fc_ptr[5] += delta * iMJ_ptr[5];
+
+		}
+		for(int i=0; i<m; i++)
+		{
+
+			int index = order[i].index;
+
+
+			if (findex[index] >= 0) {
+				hi[index] = dFabs (hicopy[index] * lambda[findex[index]]);
+				lo[index] = -hi[index];
+			}
+
+			dReal new_lambda = lambda[index] + delta_lambda[index];
+			if (new_lambda < lo[index]) {
+				delta_lambda[index] = lo[index]-lambda[index];
+				lambda[index] = lo[index];
+			}
+			else if (new_lambda > hi[index]) {
+				delta_lambda[index] = hi[index]-lambda[index];
+				lambda[index] = hi[index];
+			}
+			else {
+				lambda[index] = new_lambda;
+			}
+
+	
+			int b1 = jb[index*2];
+			int b2 = jb[index*2+1];
+			iMJ_ptr = iMJ + index*12;
+			dRealMutablePtr fc_ptr = fc + 6*b1;
+			fc_ptr[0] += delta_lambda[index] * iMJ_ptr[0];//_lambda[index]
+			fc_ptr[1] += delta_lambda[index] * iMJ_ptr[1];//_lambda[index]
+			fc_ptr[2] += delta_lambda[index] * iMJ_ptr[2];//_lambda[index]
+			fc_ptr[3] += delta_lambda[index] * iMJ_ptr[3];//_lambda[index]
+			fc_ptr[4] += delta_lambda[index] * iMJ_ptr[4];//_lambda[index]
+			fc_ptr[5] += delta_lambda[index] * iMJ_ptr[5];//_lambda[index]
 			// @@@ potential optimization: handle 1-body constraints in a separate
 			//     loop to avoid the cost of test & jump?
 			if (b2 >= 0) {
 				fc_ptr = fc + 6*b2;
-				fc_ptr[0] += delta * iMJ_ptr[6];
-				fc_ptr[1] += delta * iMJ_ptr[7];
-				fc_ptr[2] += delta * iMJ_ptr[8];
-				fc_ptr[3] += delta * iMJ_ptr[9];
-				fc_ptr[4] += delta * iMJ_ptr[10];
-				fc_ptr[5] += delta * iMJ_ptr[11];
+				fc_ptr[0] += delta_lambda[index] * iMJ_ptr[6];//_lambda[index]
+				fc_ptr[1] += delta_lambda[index] * iMJ_ptr[7];//_lambda[index]
+				fc_ptr[2] += delta_lambda[index] * iMJ_ptr[8];//_lambda[index]
+				fc_ptr[3] += delta_lambda[index] * iMJ_ptr[9];//_lambda[index]
+				fc_ptr[4] += delta_lambda[index] * iMJ_ptr[10];//_lambda[index]
+				fc_ptr[5] += delta_lambda[index] * iMJ_ptr[11];//_lambda[index]
 			}
 		}
 	}
 }
-
+*/
 
 void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
-		     dxJoint * const *_joint, int nj, dReal stepsize)
+		     dxJoint **joint, int nj, dReal stepsize)
 {
+	
 	int i,j;
 	IFTIMING(dTimerStart("preprocessing");)
 
@@ -534,8 +771,8 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 	// (the "dxJoint *const*" declaration says we're allowed to modify the joints
 	// but not the joint array, because the caller might need it unchanged).
 	//@@@ do we really need to do this? we'll be sorting constraint rows individually, not joints
-	dxJoint **joint = (dxJoint**) alloca (nj * sizeof(dxJoint*));
-	memcpy (joint,_joint,nj * sizeof(dxJoint*));
+	//dxJoint **joint = (dxJoint**) alloca (nj * sizeof(dxJoint*));//slipch@ - no need  to copy with sipmle island processing
+	//memcpy (joint,_joint,nj * sizeof(dxJoint*));
 	
 	// for all bodies, compute the inertia tensor and its inverse in the global
 	// frame, and compute the rotational force and add it to the torque
@@ -543,16 +780,33 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 	dRealAllocaArray (I,3*4*nb);	// need to remember all I's for feedback purposes only
 	dRealAllocaArray (invI,3*4*nb);
 	for (i=0; i<nb; i++) {
+
 		dMatrix3 tmp;
+		dxBody	*b=body[i];
+#ifdef DEBUG_VALID
+		dIASSERT(dValid(b->tacc[0])&&dValid(b->tacc[1])&&dValid(b->tacc[2]));
+#endif
 		// compute inertia tensor in global frame
-		dMULTIPLY2_333 (tmp,body[i]->mass.I,body[i]->R);
-		dMULTIPLY0_333 (I+i*12,body[i]->R,tmp);
+		dMULTIPLY2_333 (tmp,b->mass.I,body[i]->R);
+		dMULTIPLY0_333 (I+i*12,b->R,tmp);
 		// compute inverse inertia tensor in global frame
-		dMULTIPLY2_333 (tmp,body[i]->invI,body[i]->R);
-		dMULTIPLY0_333 (invI+i*12,body[i]->R,tmp);
+		dMULTIPLY2_333 (tmp,b->invI,b->R);
+		dMULTIPLY0_333 (invI+i*12,b->R,tmp);
 		// compute rotational force
-		dMULTIPLY0_331 (tmp,I+i*12,body[i]->avel);
-		dCROSS (body[i]->tacc,-=,body[i]->avel,tmp);
+		dMULTIPLY0_331 (tmp,I+i*12,b->avel);
+
+		dCROSS (b->tacc,-=,b->avel,tmp);
+#ifndef dNODEBUG
+		if(!(dValid(b->tacc[0])&&dValid(b->tacc[1])&&dValid(b->tacc[2])))
+		{
+			//char s[64];
+			//_snprintf (s,sizeof(s),"tmp %f,%f,%f \n avel %f,%f,%f",tmp[0],tmp[1],tmp[2],b->avel[0],b->avel[1],b->avel[2]);
+			//dUASSERT(0,"tmp %f,%f,%f \n avel %f,%f,%f",tmp[0],tmp[1],tmp[2],b->avel[0],b->avel[1],b->avel[2]);
+
+			dDebug (d_ERR_UASSERT," (%s:%d \n tmp %f,%f,%f \n avel %f,%f,%f)", __FILE__,__LINE__,tmp[0],tmp[1],tmp[2],b->avel[0],b->avel[1],b->avel[2]);
+		}
+
+#endif
 	}
 
 	// add the gravity force to all bodies
@@ -694,7 +948,7 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 		//@@@ note that this doesn't work for contact joints yet, as they are
 		// recreated every iteration
 		for (i=0; i<nj; i++) {
-			memcpy (joint[i]->lambda,lambda+ofs[i],info[i].m * sizeof(dReal));
+			memcpy (joint[i]->lambda,lambda+ofs[i],info[i].m * sizeof(dReal));//valid?
 		}
 #endif
 
@@ -702,11 +956,32 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 		// they should not be used again.
 		
 		// add stepsize * cforce to the body velocity
-		for (i=0; i<nb; i++) {
-			for (j=0; j<3; j++) body[i]->lvel[j] += stepsize * cforce[i*6+j];
-			for (j=0; j<3; j++) body[i]->avel[j] += stepsize * cforce[i*6+3+j];
-		}
+		bool bvalid=true;
+		for (i=0; i<nb; i++) 
+			for (j=0; j<3; j++)
+			{
 
+				float &lf=cforce[i*6+j];
+				float &af=cforce[i*6+3+j];
+				if(!dValid(lf))
+				{
+					lf=0.f;
+					bvalid=false;
+				}
+				if(!dValid(af))
+				{
+					af=0.f;
+					bvalid=false;
+				}
+				 body[i]->lvel[j] += stepsize * lf; //valid?
+				 body[i]->avel[j] += stepsize * af;//valid?
+			}
+		if(!bvalid)
+		{
+			for (i=0; i<nj; i++) {
+				for(j=0;j<6;j++)joint[i]->lambda[j]=0.f;
+			}
+		}
 		// if joint feedback is requested, compute the constraint force.
 		// BUT: cforce is inv(M)*J'*lambda, whereas we want just J'*lambda,
 		// so we must compute M*cforce.
@@ -749,10 +1024,26 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 
 	IFTIMING (dTimerNow ("compute velocity update");)
 	for (i=0; i<nb; i++) {
-		dReal body_invMass = body[i]->invMass;
-		for (j=0; j<3; j++) body[i]->lvel[j] += stepsize * body_invMass * body[i]->facc[j];
-		for (j=0; j<3; j++) body[i]->tacc[j] *= stepsize;	
-		dMULTIPLYADD0_331 (body[i]->avel,invI + i*12,body[i]->tacc);
+		dxBody	*b=body[i];
+		dReal body_invMass = b->invMass;
+		for (j=0; j<3; j++) 
+		{
+			//if (_valid(body[i]->facc[j]))
+				b->lvel[j] += stepsize * body_invMass *b->facc[j];
+		}
+		for (j=0; j<3; j++)
+		{	
+		//	if(!_valid(b->tacc[j]))b->tacc[j]=0.f;
+			b->tacc[j] *= stepsize;	
+		}
+#ifdef DEBUG_VALID
+		dIASSERT(dValid(b->avel[0])&&dValid(b->avel[1])&&dValid(b->avel[2]));
+		dIASSERT(dValid(b->tacc[0])&&dValid(b->tacc[1])&&dValid(b->tacc[2]));
+#endif
+		dMULTIPLYADD0_331 (b->avel,invI + i*12,b->tacc);
+#ifdef DEBUG_VALID
+		dIASSERT(dValid(b->avel[0])&&dValid(b->avel[1])&&dValid(b->avel[2]));
+#endif
 	}
 
 #if 0
@@ -772,16 +1063,19 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 	// update the position and orientation from the new linear/angular velocity
 	// (over the given timestep)
 	IFTIMING (dTimerNow ("update position");)
-	for (i=0; i<nb; i++) dxStepBody (body[i],stepsize);
+		for (i = 0; i < nb; i++) {
+			if ((body[i]->flags & dxBodyNoUpdatePos) == 0)
+				dxStepBody(body[i], stepsize);
+		}
 
 	IFTIMING (dTimerNow ("tidy up");)
 
-	// zero all force accumulators
-	for (i=0; i<nb; i++) {
-		dSetZero (body[i]->facc,3);
-		dSetZero (body[i]->tacc,3);
-	}
+		// zero all force accumulators
+		for (i=0; i<nb; i++) {
+			dSetZero (body[i]->facc,3);
+			dSetZero (body[i]->tacc,3);
+		}
 
-	IFTIMING (dTimerEnd();)
-	IFTIMING (if (m > 0) dTimerReport (stdout,1);)
+		IFTIMING (dTimerEnd();)
+			IFTIMING (if (m > 0) dTimerReport (stdout,1);)
 }

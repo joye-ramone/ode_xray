@@ -24,15 +24,48 @@
 #define _ODE_UTIL_H_
 
 #include "objects.h"
+#include "float.h"
 
+#ifndef MSVC
+#include <cmath> // for fpclassify
+#endif
 
 void dInternalHandleAutoDisabling (dxWorld *world, dReal stepsize);
-void dxStepBody (dxBody *b, dReal h);
-
+extern "C"
+{
+	void dxStepBody (dxBody *b, dReal h);
+}
 typedef void (*dstepper_fn_t) (dxWorld *world, dxBody * const *body, int nb,
-        dxJoint * const *_joint, int nj, dReal stepsize);
+        dxJoint **joint, int nj, dReal stepsize);
+
 
 void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper);
 
-
+inline bool		dValid	(const float x)
+{
+#ifdef MSVC
+    // check for: Signaling NaN, Quiet NaN, Negative infinity (-INF), Positive infinity (+INF), Negative denormalized, Positive denormalized
+	int			cls			= _fpclass		(double(x));
+	if (cls&(_FPCLASS_SNAN+_FPCLASS_QNAN+_FPCLASS_NINF+_FPCLASS_PINF+_FPCLASS_ND+_FPCLASS_PD))	
+		return	false;	
+#else
+	int cls = std::fpclassify((double)x);
+    switch (cls)
+    {
+    case FP_NAN:
+    case FP_INFINITE:
+    case FP_SUBNORMAL:
+        return false;
+    default:
+        break;
+    }
+#endif
+	/*	*****other cases are*****
+	_FPCLASS_NN Negative normalized non-zero 
+	_FPCLASS_NZ Negative zero ( – 0) 
+	_FPCLASS_PZ Positive 0 (+0) 
+	_FPCLASS_PN Positive normalized non-zero 
+	*/
+	return		true;
+}
 #endif

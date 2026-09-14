@@ -39,7 +39,25 @@ transform is the identity.
 
 extern "C" void dBodyAddTorque (dBodyID, dReal fx, dReal fy, dReal fz);
 extern "C" void dBodyAddForce (dBodyID, dReal fx, dReal fy, dReal fz);
+const dReal min_stop_err				=					M_PI*0.03f;//0.1f;//
+const dReal min_ball_err				=					0.0f;//0.01f;
+const dReal hinge_min_err_exis_par		=					0.000f;//0.01f;
+const dReal stop_early_reaction			=					M_PI*0.00f;
+//#define USE_STOPS_MIN_ERR									1
 
+static inline void add_min_err(dReal	&param,const dReal min_err)
+{
+	if(param>REAL(0.))
+	{
+		param-=min_err;
+		if(param<REAL(0.))param=REAL(0.);
+	}
+	else
+	{
+		param+=min_err;
+		if(param>REAL(0.))param=REAL(0.);
+	}
+}
 //****************************************************************************
 // utility
 
@@ -72,8 +90,12 @@ static inline void setBall (dxJoint *joint, dxJoint::Info2 *info,
   dReal k = info->fps * info->erp;
   if (joint->node[1].body) {
     for (int j=0; j<3; j++) {
-      info->c[j] = k * (a2[j] + joint->node[1].body->pos[j] -
-			a1[j] - joint->node[0].body->pos[j]);
+		dReal err=a2[j] + joint->node[1].body->pos[j] -
+			a1[j] - joint->node[0].body->pos[j];
+#ifdef		USE_BALL_MIN_ERR
+	  add_min_err(err,min_ball_err);
+#endif
+      info->c[j] = k * (err);
     }
   }
   else {
@@ -446,14 +468,25 @@ dReal dxJointLimitMotor::get (int num)
 
 int dxJointLimitMotor::testRotationalLimit (dReal angle)
 {
-  if (angle <= lostop) {
+  if (angle <= (lostop)) {//+stop_early_reaction
     limit = 1;
-    limit_err = angle - lostop;
+#ifdef USE_STOPS_MIN_ERR
+    limit_err = angle - lostop+min_stop_err;
+	if(limit_err>REAL(0.))limit_err=REAL(0.);
+#else
+	limit_err = angle - lostop;
+#endif
+
     return 1;
   }
-  else if (angle >= histop) {
+  else if (angle >= (histop)) {//-stop_early_reaction
     limit = 2;
-    limit_err = angle - histop;
+#ifdef USE_STOPS_MIN_ERR
+    limit_err = angle - histop-min_stop_err;
+	if(limit_err<REAL(0.))limit_err=REAL(0.);
+#else
+	limit_err = angle - histop;
+#endif
     return 1;
   }
   else {
@@ -561,6 +594,17 @@ int dxJointLimitMotor::addLimot (dxJoint *joint,
     }
 
     if (limit) {
+	  //dReal l_limit_error;
+	  //if(limit==1) 
+	  //{
+		 // l_limit_error=limit_err+min_stop_err;
+		 // if(l_limit_error>0.f) l_limit_error=0.f;
+	  //}
+	  //else
+	  //{
+		 // l_limit_error=limit_err-min_stop_err;
+		 // if(l_limit_error<0.f) l_limit_error=0.f;
+	  //}
       dReal k = info->fps * stop_erp;
       info->c[row] = -k * limit_err;
       info->cfm[row] = stop_cfm;
@@ -682,7 +726,8 @@ dxJoint::Vtable __dball_vtable = {
   (dxJoint::init_fn*) ballInit,
   (dxJoint::getInfo1_fn*) ballGetInfo1,
   (dxJoint::getInfo2_fn*) ballGetInfo2,
-  dJointTypeBall};
+  dJointTypeBall
+};
 
 //****************************************************************************
 // hinge
@@ -782,9 +827,43 @@ static void hingeGetInfo2 (dxJointHinge *joint, dxJoint::Info2 *info)
     ax2[2] = joint->axis2[2];
   }
   dCROSS (b,=,ax1,ax2);
+
+#ifdef USE_HINGE_MIN_ERR
+  dVector3 verr={b[0],b[1],b[2]};
+  dNormalize3(verr);
+  b[0]+=verr[0]*hinge_min_err_exis_par;
+  b[1]+=verr[1]*hinge_min_err_exis_par;
+  b[2]+=verr[2]*hinge_min_err_exis_par;
+#endif
+
   dReal k = info->fps * info->erp;
-  info->c[3] = k * dDOT(b,p);
-  info->c[4] = k * dDOT(b,q);
+  dReal er1=dDOT(b,p);
+  dReal er2=dDOT(b,q);
+
+  /*if(er1>0.f)
+  {
+		er1-=hinge_min_err_exis_par;
+		if(er1<0.f)er1=0.f;
+  }
+  else
+  {
+		er1+=hinge_min_err_exis_par;
+		if(er1>0.f)er1=0.f;
+  }
+
+  if(er2>0.f)
+  {
+	  er2-=hinge_min_err_exis_par;
+	  if(er2<0.f)er2=0.f;
+  }
+  else
+  {
+	  er2+=hinge_min_err_exis_par;
+	  if(er2>0.f)er2=0.f;
+  }*/
+
+  info->c[3] = k * er1;
+  info->c[4] = k * er2;
 
   // if the hinge is powered, or has joint limits, add in the stuff
   joint->limot.addLimot (joint,info,5,ax1,1);
@@ -936,7 +1015,8 @@ dxJoint::Vtable __dhinge_vtable = {
   (dxJoint::init_fn*) hingeInit,
   (dxJoint::getInfo1_fn*) hingeGetInfo1,
   (dxJoint::getInfo2_fn*) hingeGetInfo2,
-  dJointTypeHinge};
+  dJointTypeHinge
+};
 
 //****************************************************************************
 // slider
@@ -1171,7 +1251,8 @@ dxJoint::Vtable __dslider_vtable = {
   (dxJoint::init_fn*) sliderInit,
   (dxJoint::getInfo1_fn*) sliderGetInfo1,
   (dxJoint::getInfo2_fn*) sliderGetInfo2,
-  dJointTypeSlider};
+  dJointTypeSlider
+};
 
 //****************************************************************************
 // contact
@@ -1357,6 +1438,12 @@ static void contactGetInfo2 (dxJointContact *j, dxJoint::Info2 *info)
       info->cfm[2] = j->contact.surface.slip2;
   }
 }
+const float finit_big_force = 1.e5;
+static void contactSpecialGetInfo2 (dxJointContact *j, dxJoint::Info2 *info)
+{
+	contactGetInfo2(j,info);
+	info->hi[0] = finit_big_force;
+}
 
 
 dxJoint::Vtable __dcontact_vtable = {
@@ -1364,7 +1451,16 @@ dxJoint::Vtable __dcontact_vtable = {
   (dxJoint::init_fn*) contactInit,
   (dxJoint::getInfo1_fn*) contactGetInfo1,
   (dxJoint::getInfo2_fn*) contactGetInfo2,
-  dJointTypeContact};
+  dJointTypeContact
+};
+
+dxJoint::Vtable __dcontact_special_vtable = {
+	sizeof(dxJointContact),
+		(dxJoint::init_fn*) contactInit,
+		(dxJoint::getInfo1_fn*) contactGetInfo1,
+		(dxJoint::getInfo2_fn*) contactSpecialGetInfo2,
+		dJointTypeContact
+};
 
 //****************************************************************************
 // hinge 2. note that this joint must be attached to two bodies for it to work
@@ -1716,7 +1812,8 @@ dxJoint::Vtable __dhinge2_vtable = {
   (dxJoint::init_fn*) hinge2Init,
   (dxJoint::getInfo1_fn*) hinge2GetInfo1,
   (dxJoint::getInfo2_fn*) hinge2GetInfo2,
-  dJointTypeHinge2};
+  dJointTypeHinge2
+};
 
 //****************************************************************************
 // universal
@@ -2173,7 +2270,8 @@ dxJoint::Vtable __duniversal_vtable = {
   (dxJoint::init_fn*) universalInit,
   (dxJoint::getInfo1_fn*) universalGetInfo1,
   (dxJoint::getInfo2_fn*) universalGetInfo2,
-  dJointTypeUniversal};
+  dJointTypeUniversal
+};
 
 //****************************************************************************
 // angular motor
@@ -2421,11 +2519,11 @@ extern "C" void dJointSetAMotorAxis (dxJointAMotor *joint, int anum, int rel,
 extern "C" void dJointSetAMotorAngle (dxJointAMotor *joint, int anum,
 				      dReal angle)
 {
-  dAASSERT(joint && anum >= 0 && anum < 3);
+  dAASSERT(joint && anum >= 0 && anum < 2);
   dUASSERT(joint->vtable == &__damotor_vtable,"joint is not an amotor");
   if (joint->mode == dAMotorUser) {
     if (anum < 0) anum = 0;
-    if (anum > 3) anum = 3;
+    if (anum > 2) anum = 2;
     joint->angle[anum] = angle;
   }
 }
@@ -2499,10 +2597,10 @@ extern "C" int dJointGetAMotorAxisRel (dxJointAMotor *joint, int anum)
 
 extern "C" dReal dJointGetAMotorAngle (dxJointAMotor *joint, int anum)
 {
-  dAASSERT(joint && anum >= 0 && anum < 3);
+  dAASSERT(joint && anum >= 0 && anum < 2);
   dUASSERT(joint->vtable == &__damotor_vtable,"joint is not an amotor");
   if (anum < 0) anum = 0;
-  if (anum > 3) anum = 3;
+  if (anum > 2) anum = 2;
   return joint->angle[anum];
 }
 
@@ -2551,12 +2649,12 @@ extern "C" void dJointAddAMotorTorques (dxJointAMotor *joint, dReal torque1, dRe
   axes[0][2] *= torque1;
   if (joint->num >= 2) {
     axes[0][0] += axes[1][0] * torque2;
-    axes[0][1] += axes[1][0] * torque2;
-    axes[0][2] += axes[1][0] * torque2;
+    axes[0][1] += axes[1][1] * torque2;
+    axes[0][2] += axes[1][2] * torque2;
     if (joint->num >= 3) {
       axes[0][0] += axes[2][0] * torque3;
-      axes[0][1] += axes[2][0] * torque3;
-      axes[0][2] += axes[2][0] * torque3;
+      axes[0][1] += axes[2][1] * torque3;
+      axes[0][2] += axes[2][2] * torque3;
     }
   }
 
@@ -2572,7 +2670,8 @@ dxJoint::Vtable __damotor_vtable = {
   (dxJoint::init_fn*) amotorInit,
   (dxJoint::getInfo1_fn*) amotorGetInfo1,
   (dxJoint::getInfo2_fn*) amotorGetInfo2,
-  dJointTypeAMotor};
+  dJointTypeAMotor
+};
 
 //****************************************************************************
 // fixed joint
@@ -2653,13 +2752,39 @@ extern "C" void dJointSetFixed (dxJointFixed *joint)
   }
 }
 
+extern "C" void dJointSetFixedQuaternionPos (dxJointFixed *joint,dQuaternion quaternion,dReal* pos)
+{
+  dUASSERT(joint,"bad joint argument");
+  dUASSERT(joint->vtable == &__dfixed_vtable,"joint is not fixed");
+  int i;
+
+  // This code is taken from sJointSetSliderAxis(), we should really put the
+  // common code in its own function.
+  // compute the offset between the bodies
+  if (joint->node[0].body) {
+    if (joint->node[1].body) {
+     /* dQMultiply1 (joint->qrel,joint->node[0].body->q,joint->node[1].body->q);
+      dReal ofs[4];
+      for (i=0; i<4; i++) ofs[i] = joint->node[0].body->pos[i];
+      for (i=0; i<4; i++) ofs[i] -= joint->node[1].body->pos[i];
+      dMULTIPLY1_331 (joint->offset,joint->node[0].body->R,ofs);*/
+    }
+    else {
+      // set joint->qrel to the transpose of the first body's q
+      joint->qrel[0] = quaternion[0];//joint->node[0].body->q[0];
+      for (i=1; i<4; i++) joint->qrel[i] = -quaternion[i];//-joint->node[0].body->q[i];
+      for (i=0; i<3; i++) joint->offset[i] = pos[i];//joint->node[0].body->pos[i];
+    }
+  }
+}
 
 dxJoint::Vtable __dfixed_vtable = {
   sizeof(dxJointFixed),
   (dxJoint::init_fn*) fixedInit,
   (dxJoint::getInfo1_fn*) fixedGetInfo1,
   (dxJoint::getInfo2_fn*) fixedGetInfo2,
-  dJointTypeFixed};
+  dJointTypeFixed
+};
 
 //****************************************************************************
 // null joint
@@ -2682,4 +2807,5 @@ dxJoint::Vtable __dnull_vtable = {
   (dxJoint::init_fn*) 0,
   (dxJoint::getInfo1_fn*) nullGetInfo1,
   (dxJoint::getInfo2_fn*) nullGetInfo2,
-  dJointTypeNull};
+  dJointTypeNull
+};

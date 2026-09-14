@@ -25,7 +25,7 @@
 #ifndef _ODE_ERROR_H_
 #define _ODE_ERROR_H_
 
-#include <ode/config.h>
+#include "config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,9 +51,9 @@ dMessageFunction *dGetDebugHandler();
 dMessageFunction *dGetMessageHandler();
 
 /* generate a fatal error, debug trap or a message. */
-void dError (int num, const char *msg, ...);
-void dDebug (int num, const char *msg, ...);
-void dMessage (int num, const char *msg, ...);
+void _cdecl dError (int num, const char *msg, ...);
+void _cdecl dDebug (int num, const char *msg, ...);
+void _cdecl dMessage (int num, const char *msg, ...);
 
 
 #ifdef __cplusplus

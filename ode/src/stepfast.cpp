@@ -1,26 +1,26 @@
 /*************************************************************************
- *                                                                       *
- * Open Dynamics Engine, Copyright (C) 2001,2002 Russell L. Smith.       *
- * All rights reserved.  Email: russ@q12.org   Web: www.q12.org          *
- *                                                                       *
- * Fast iterative solver, David Whittaker. Email: david@csworkbench.com  *
- *                                                                       *
- * This library is free software; you can redistribute it and/or         *
- * modify it under the terms of EITHER:                                  *
- *   (1) The GNU Lesser General Public License as published by the Free  *
- *       Software Foundation; either version 2.1 of the License, or (at  *
- *       your option) any later version. The text of the GNU Lesser      *
- *       General Public License is included with this library in the     *
- *       file LICENSE.TXT.                                               *
- *   (2) The BSD-style license that is included with this library in     *
- *       the file LICENSE-BSD.TXT.                                       *
- *                                                                       *
- * This library is distributed in the hope that it will be useful,       *
- * but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the files    *
- * LICENSE.TXT and LICENSE-BSD.TXT for more details.                     *
- *                                                                       *
- *************************************************************************/
+*                                                                       *
+* Open Dynamics Engine, Copyright (C) 2001,2002 Russell L. Smith.       *
+* All rights reserved.  Email: russ@q12.org   Web: www.q12.org          *
+*                                                                       *
+* Fast iterative solver, David Whittaker. Email: david@csworkbench.com  *
+*                                                                       *
+* This library is free software; you can redistribute it and/or         *
+* modify it under the terms of EITHER:                                  *
+*   (1) The GNU Lesser General Public License as published by the Free  *
+*       Software Foundation; either version 2.1 of the License, or (at  *
+*       your option) any later version. The text of the GNU Lesser      *
+*       General Public License is included with this library in the     *
+*       file LICENSE.TXT.                                               *
+*   (2) The BSD-style license that is included with this library in     *
+*       the file LICENSE-BSD.TXT.                                       *
+*                                                                       *
+* This library is distributed in the hope that it will be useful,       *
+* but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the files    *
+* LICENSE.TXT and LICENSE-BSD.TXT for more details.                     *
+*                                                                       *
+*************************************************************************/
 
 // This is the StepFast code by David Whittaker. This code is faster, but
 // sometimes less stable than, the original "big matrix" code.
@@ -37,12 +37,11 @@
 #include <ode/timer.h>
 #include <ode/error.h>
 #include <ode/matrix.h>
-#include <ode/misc.h>
 #include "lcp.h"
 #include "step.h"
-#include "util.h"
+#include <stdlib.h>
 
-
+#include "StepJointInternal.h"
 // misc defines
 
 #define ALLOCA dALLOCA16
@@ -50,7 +49,7 @@
 #define RANDOM_JOINT_ORDER
 //#define FAST_FACTOR	//use a factorization approximation to the LCP solver (fast, theoretically less accurate)
 #define SLOW_LCP      //use the old LCP solver
-//#define NO_ISLANDS    //does not perform island creation code (3~4% of simulation time), body disabling doesn't work
+#define NO_ISLANDS    //does not perform island creation code (3~4% of simulation time), body disabling doesn't work
 //#define TIMING
 
 
@@ -112,7 +111,19 @@ MultiplyAdd2_sym_p8p (dReal * A, dReal * B, dReal * C, int p, int Askip)
 		//aa is going accross the matrix, ad down
 		aa = ad = A;
 		cc = C;
-		for (j = i; j < p; j++)
+
+		sum = bb[0] * cc[0];
+		sum += bb[1] * cc[1];
+		sum += bb[2] * cc[2];
+		sum += bb[4] * cc[4];
+		sum += bb[5] * cc[5];
+		sum += bb[6] * cc[6];
+		*(aa++) += sum;
+		//*ad += sum;
+		ad += Askip;
+		cc += 8;
+		
+		for (j = i+1; j < p; j++)
 		{
 			sum = bb[0] * cc[0];
 			sum += bb[1] * cc[1];
@@ -389,16 +400,10 @@ dInternalStepFast (dxWorld * world, dxBody * body[2], dReal * GI[2], dReal * Gin
 	dReal A[6 * 8];
 	//dSetZero (A, 6 * 8);
 
-	if (body[0]) {
+	if (body[0])
 		Multiply2_sym_p8p (A, JinvM, Jinfo.J1l, m, mskip);
-		if (body[1])
-			MultiplyAdd2_sym_p8p (A, JinvM + 8 * m, Jinfo.J2l,
-                                              m, mskip);
-	} else {
-		if (body[1])
-			Multiply2_sym_p8p (A, JinvM + 8 * m, Jinfo.J2l,
-                                           m, mskip);
-	}
+	if (body[1])
+		MultiplyAdd2_sym_p8p (A, JinvM + 8 * m, Jinfo.J2l, m, mskip);
 
 	// add cfm to the diagonal of A
 	for (i = 0; i < m; i++)
@@ -425,14 +430,10 @@ dInternalStepFast (dxWorld * world, dxBody * body[2], dReal * GI[2], dReal * Gin
 	dReal rhs[6];
 	//dSetZero (rhs, 6);
 
-	if (body[0]) {
+	if (body[0])
 		Multiply0_p81 (rhs, Jinfo.J1l, tmp1, m);
-		if (body[1])
-			MultiplyAdd0_p81 (rhs, Jinfo.J2l, tmp1 + 8, m);
-	} else {
-		if (body[1])
-			Multiply0_p81 (rhs, Jinfo.J2l, tmp1 + 8, m);
-	}
+	if (body[1])
+		MultiplyAdd0_p81 (rhs, Jinfo.J2l, tmp1 + 8, m);
 
 	// complete rhs
 	for (i = 0; i < m; i++)
@@ -446,146 +447,23 @@ dInternalStepFast (dxWorld * world, dxBody * body[2], dReal * GI[2], dReal * Gin
 #	endif
 	dReal *lambda = (dReal *) ALLOCA (m * sizeof (dReal));
 	dReal *residual = (dReal *) ALLOCA (m * sizeof (dReal));
-	dReal lo[6], hi[6];
+	dReal lo[6], hi[6];//,lo1[6],hi1[6];
 	memcpy (lo, Jinfo.lo, m * sizeof (dReal));
 	memcpy (hi, Jinfo.hi, m * sizeof (dReal));
-	dSolveLCP (m, A, lambda, rhs, residual, nub, lo, hi, Jinfo.findex);
+
+	//if(m==3&&nub==0&&Jinfo.findex[1]!=-1&&Jinfo.findex[2]!=-1)
+	//{
+	//	//memcpy (lo1, Jinfo.lo, m * sizeof (dReal));
+	//	//memcpy (hi1, Jinfo.hi, m * sizeof (dReal));
+	//	dSolveLCP33(m, A, lambda, rhs, residual, nub, lo, hi, Jinfo.findex);
+	//}
+	//else 
+		dSolveLCP (m, A, lambda, rhs, residual, nub, lo, hi, Jinfo.findex);
 #endif
 
-	// LCP Solver replacement:
-	// This algorithm goes like this:
-	// Do a straightforward LDLT factorization of the matrix A, solving for
-	// A*x = rhs
-	// For each x[i] that is outside of the bounds of lo[i] and hi[i],
-	//    clamp x[i] into that range.
-	//    Substitute into A the now known x's
-	//    subtract the residual away from the rhs.
-	//    Remove row and column i from L, updating the factorization
-	//    place the known x's at the end of the array, keeping up with location in p
-	// Repeat until all constraints have been clamped or all are within bounds
-	//
-	// This is probably only faster in the single joint case where only one repeat is
-	// the norm.
+	//здесь был  LCP - solver replacement он остался в базе Source control
+	//скорее всего он не понадобится
 
-#ifdef FAST_FACTOR
-	// factorize A (L*D*L'=A)
-#	ifdef TIMING
-	dTimerNow ("factorize A");
-#	endif
-	dReal d[6];
-	dReal L[6 * 8];
-	memcpy (L, A, m * mskip * sizeof (dReal));
-	dFactorLDLT (L, d, m, mskip);
-
-	// compute lambda
-#	ifdef TIMING
-	dTimerNow ("compute lambda");
-#	endif
-
-	int left = m;				//constraints left to solve.
-	int remove[6];
-	dReal lambda[6];
-	dReal x[6];
-	int p[6];
-	for (i = 0; i < 6; i++)
-		p[i] = i;
-	while (true)
-	{
-		memcpy (x, rhs, left * sizeof (dReal));
-		dSolveLDLT (L, d, x, left, mskip);
-
-		int fixed = 0;
-		for (i = 0; i < left; i++)
-		{
-			j = p[i];
-			remove[i] = false;
-			// This isn't the exact same use of findex as dSolveLCP.... since x[findex]
-			// may change after I've already clamped x[i], but it should be close
-			if (Jinfo.findex[j] > -1)
-			{
-				dReal f = fabs (Jinfo.hi[j] * x[p[Jinfo.findex[j]]]);
-				if (x[i] > f)
-					x[i] = f;
-				else if (x[i] < -f)
-					x[i] = -f;
-				else
-					continue;
-			}
-			else
-			{
-				if (x[i] > Jinfo.hi[j])
-					x[i] = Jinfo.hi[j];
-				else if (x[i] < Jinfo.lo[j])
-					x[i] = Jinfo.lo[j];
-				else
-					continue;
-			}
-			remove[i] = true;
-			fixed++;
-		}
-		if (fixed == 0 || fixed == left)	//no change or all constraints solved
-			break;
-
-		for (i = 0; i < left; i++)	//sub in to right hand side.
-			if (remove[i])
-				for (j = 0; j < left; j++)
-					if (!remove[j])
-						rhs[j] -= A[j * mskip + i] * x[i];
-
-		for (int r = left - 1; r >= 0; r--)	//eliminate row/col for fixed variables
-		{
-			if (remove[r])
-			{
-				//dRemoveLDLT adapted for use without row pointers.
-				if (r == left - 1)
-				{
-					left--;
-					continue;	// deleting last row/col is easy
-				}
-				else if (r == 0)
-				{
-					dReal a[6];
-					for (i = 0; i < left; i++)
-						a[i] = -A[i * mskip];
-					a[0] += REAL (1.0);
-					dLDLTAddTL (L, d, a, left, mskip);
-				}
-				else
-				{
-					dReal t[6];
-					dReal a[6];
-					for (i = 0; i < r; i++)
-						t[i] = L[r * mskip + i] / d[i];
-					for (i = 0; i < left - r; i++)
-						a[i] = dDot (L + (r + i) * mskip, t, r) - A[(r + i) * mskip + r];
-					a[0] += REAL (1.0);
-					dLDLTAddTL (L + r * mskip + r, d + r, a, left - r, mskip);
-				}
-
-				dRemoveRowCol (L, left, mskip, r);
-				//end dRemoveLDLT
-
-				left--;
-				if (r < (left - 1))
-				{
-					dReal tx = x[r];
-					memmove (d + r, d + r + 1, (left - r) * sizeof (dReal));
-					memmove (rhs + r, rhs + r + 1, (left - r) * sizeof (dReal));
-					//x will get written over by rhs anyway, no need to move it around
-					//just store the fixed value we just discovered in it.
-					x[left] = tx;
-					for (i = 0; i < m; i++)
-						if (p[i] > r && p[i] <= left)
-							p[i]--;
-					p[r] = left;
-				}
-			}
-		}
-	}
-
-	for (i = 0; i < m; i++)
-		lambda[i] = x[p[i]];
-#	endif
 	// compute the constraint force `cforce'
 #	ifdef TIMING
 	dTimerNow ("compute constraint force");
@@ -647,8 +525,25 @@ dInternalStepFast (dxWorld * world, dxBody * body[2], dReal * GI[2], dReal * Gin
 	}
 }
 
+inline void SwapJoints(int i,int j,dxJoint** joints,dxJoint::Info1* info,dxJoint::Info2* Jinfo)
+{
+	dxJoint* joint		= joints[j];
+	dxJoint::Info1 i1 = info[j];
+	dxJoint::Info2 i2 = Jinfo[j];
+
+	int r = rand () % (j+1);
+
+	joints[j] = joints[r];
+	info[j] = info[r];
+	Jinfo[j] = Jinfo[r];
+
+	joints[r] = joint;
+	info[r] = i1;
+	Jinfo[r] = i2;
+}
+
 void
-dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoint * const *_joints, int nj, dReal stepsize, int maxiterations)
+dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoint **joints, int nj, dReal stepsize, int maxiterations)
 {
 #   ifdef TIMING
 	dTimerNow ("preprocessing");
@@ -662,8 +557,8 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 	// make a local copy of the joint array, because we might want to modify it.
 	// (the "dxJoint *const*" declaration says we're allowed to modify the joints
 	// but not the joint array, because the caller might need it unchanged).
-	dxJoint **joints = (dxJoint **) ALLOCA (nj * sizeof (dxJoint *));
-	memcpy (joints, _joints, nj * sizeof (dxJoint *));
+	//dxJoint **joints = (dxJoint **) ALLOCA (nj * sizeof (dxJoint *));
+	//memcpy (joints, _joints, nj * sizeof (dxJoint *));
 
 	// get m = total constraint dimension, nub = number of unbounded variables.
 	// create constraint offset array and number-of-rows array for all joints.
@@ -714,60 +609,59 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 
 	if (m)
 	{
-	// create a constraint equation right hand side vector `c', a constraint
-	// force mixing vector `cfm', and LCP low and high bound vectors, and an
-	// 'findex' vector.
+		// create a constraint equation right hand side vector `c', a constraint
+		// force mixing vector `cfm', and LCP low and high bound vectors, and an
+		// 'findex' vector.
 		c = (dReal *) ALLOCA (m * sizeof (dReal));
 		cfm = (dReal *) ALLOCA (m * sizeof (dReal));
 		lo = (dReal *) ALLOCA (m * sizeof (dReal));
 		hi = (dReal *) ALLOCA (m * sizeof (dReal));
 		findex = (int *) ALLOCA (m * sizeof (int));
-	dSetZero (c, m);
-	dSetValue (cfm, m, world->global_cfm);
-	dSetValue (lo, m, -dInfinity);
-	dSetValue (hi, m, dInfinity);
-	for (i = 0; i < m; i++)
-		findex[i] = -1;
+		dSetZero (c, m);
+		dSetValue (cfm, m, world->global_cfm);
+		dSetValue (lo, m, -dInfinity);
+		dSetValue (hi, m, dInfinity);
 
-	// get jacobian data from constraints. a (2*m)x8 matrix will be created
-	// to store the two jacobian blocks from each constraint. it has this
-	// format:
-	//
-	//   l l l 0 a a a 0  \    .
-	//   l l l 0 a a a 0   }-- jacobian body 1 block for joint 0 (3 rows)
-	//   l l l 0 a a a 0  /
-	//   l l l 0 a a a 0  \    .
-	//   l l l 0 a a a 0   }-- jacobian body 2 block for joint 0 (3 rows)
-	//   l l l 0 a a a 0  /
-	//   l l l 0 a a a 0  }--- jacobian body 1 block for joint 1 (1 row)
-	//   l l l 0 a a a 0  }--- jacobian body 2 block for joint 1 (1 row)
-	//   etc...
-	//
-	//   (lll) = linear jacobian data
-	//   (aaa) = angular jacobian data
-	//
+
+		// get jacobian data from constraints. a (2*m)x8 matrix will be created
+		// to store the two jacobian blocks from each constraint. it has this
+		// format:
+		//
+		//   l l l 0 a a a 0  \    .
+		//   l l l 0 a a a 0   }-- jacobian body 1 block for joint 0 (3 rows)
+		//   l l l 0 a a a 0  /
+		//   l l l 0 a a a 0  \    .
+		//   l l l 0 a a a 0   }-- jacobian body 2 block for joint 0 (3 rows)
+		//   l l l 0 a a a 0  /
+		//   l l l 0 a a a 0  }--- jacobian body 1 block for joint 1 (1 row)
+		//   l l l 0 a a a 0  }--- jacobian body 2 block for joint 1 (1 row)
+		//   etc...
+		//
+		//   (lll) = linear jacobian data
+		//   (aaa) = angular jacobian data
+		//
 #   ifdef TIMING
-	dTimerNow ("create J");
+		dTimerNow ("create J");
 #   endif
 		J = (dReal *) ALLOCA (2 * m * 8 * sizeof (dReal));
 		dSetZero (J, 2 * m * 8);
 		Jinfo = (dxJoint::Info2 *) ALLOCA (nj * sizeof (dxJoint::Info2));
-	for (i = 0; i < nj; i++)
-	{
-		Jinfo[i].rowskip = 8;
-		Jinfo[i].fps = dRecip (stepsize);
-		Jinfo[i].erp = world->global_erp;
-		Jinfo[i].J1l = J + 2 * 8 * ofs[i];
-		Jinfo[i].J1a = Jinfo[i].J1l + 4;
-		Jinfo[i].J2l = Jinfo[i].J1l + 8 * info[i].m;
-		Jinfo[i].J2a = Jinfo[i].J2l + 4;
-		Jinfo[i].c = c + ofs[i];
-		Jinfo[i].cfm = cfm + ofs[i];
-		Jinfo[i].lo = lo + ofs[i];
-		Jinfo[i].hi = hi + ofs[i];
-		Jinfo[i].findex = findex + ofs[i];
-		//joints[i]->vtable->getInfo2 (joints[i], Jinfo+i);
-	}
+		for (i = 0; i < nj; i++)
+		{
+			Jinfo[i].rowskip = 8;
+			Jinfo[i].fps = dRecip (stepsize);
+			Jinfo[i].erp = world->global_erp;
+			Jinfo[i].J1l = J + 2 * 8 * ofs[i];
+			Jinfo[i].J1a = Jinfo[i].J1l + 4;
+			Jinfo[i].J2l = Jinfo[i].J1l + 8 * info[i].m;
+			Jinfo[i].J2a = Jinfo[i].J2l + 4;
+			Jinfo[i].c = c + ofs[i];
+			Jinfo[i].cfm = cfm + ofs[i];
+			Jinfo[i].lo = lo + ofs[i];
+			Jinfo[i].hi = hi + ofs[i];
+			Jinfo[i].findex = findex + ofs[i];
+			//joints[i]->vtable->getInfo2 (joints[i], Jinfo+i);
+		}
 
 	}
 
@@ -782,11 +676,13 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 			saveFacc[b * 4 + i] = bodies[b]->facc[i];
 			saveTacc[b * 4 + i] = bodies[b]->tacc[i];
 		}
-                bodies[b]->tag = b;
+		bodies[b]->tag = b;
 	}
 
 	for (iter = 0; iter < maxiterations; iter++)
 	{
+		for (i = 0; i < m; i++)
+			findex[i] = -1;
 #	ifdef TIMING
 		dTimerNow ("applying inertia and gravity");
 #	endif
@@ -821,12 +717,7 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 				body->facc[1] = saveFacc[b * 4 + 1] + body->mass.mass * world->gravity[1];
 				body->facc[2] = saveFacc[b * 4 + 2] + body->mass.mass * world->gravity[2];
 				body->facc[3] = 0;
-			} else {
-                                body->facc[0] = saveFacc[b * 4 + 0];
-                                body->facc[1] = saveFacc[b * 4 + 1];
-                                body->facc[2] = saveFacc[b * 4 + 2];
-				body->facc[3] = 0;
-                        }
+			}
 
 		}
 
@@ -836,19 +727,21 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 #endif
 		//randomize the order of the joints by looping through the array
 		//and swapping the current joint pointer with a random one before it.
-		for (j = 0; j < nj; j++)
+		for (j = 1; j < nj; j++)
 		{
-			joint = joints[j];
-			dxJoint::Info1 i1 = info[j];
-			dxJoint::Info2 i2 = Jinfo[j];
-                        const int r = dRandInt(j+1);
-			joints[j] = joints[r];
-			info[j] = info[r];
-			Jinfo[j] = Jinfo[r];
-			joints[r] = joint;
-			info[r] = i1;
-			Jinfo[r] = i2;
+			int r = rand () % (j+1);
+			SwapJoints(j,r,joints,info,Jinfo);
 		}
+		
+		//int lastns=0;
+		//for (j = 0; j < nj; j++)
+		//{
+		//	if(!joint->node[0].body||!joint->node[1].body)
+		//	{
+		//			SwapJoints(lastns,j,joints,info,Jinfo);
+		//			lastns++;
+		//	}
+		//}
 #endif
 
 		//now iterate through the random ordered joint array we created.
@@ -861,15 +754,15 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 			bodyPair[0] = joint->node[0].body;
 			bodyPair[1] = joint->node[1].body;
 
-			if (bodyPair[0] && (bodyPair[0]->flags & dxBodyDisabled))
-				bodyPair[0] = 0;
-			if (bodyPair[1] && (bodyPair[1]->flags & dxBodyDisabled))
-				bodyPair[1] = 0;
-			
+			//if (bodyPair[0] && (bodyPair[0]->flags & dxBodyDisabled))
+			//	bodyPair[0] = 0;
+			//if (bodyPair[1] && (bodyPair[1]->flags & dxBodyDisabled))
+			//	bodyPair[1] = 0;
+
 			//if this joint is not connected to any enabled bodies, skip it.
 			if (!bodyPair[0] && !bodyPair[1])
 				continue;
-			
+
 			if (bodyPair[0])
 			{
 				GIPair[0] = globalI + bodyPair[0]->tag * 12;
@@ -882,13 +775,24 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 			}
 
 			joints[j]->vtable->getInfo2 (joints[j], Jinfo + j);
-
+			
 			//dInternalStepIslandFast is an exact copy of the old routine with one
 			//modification: the calculated forces are added back to the facc and tacc
 			//vectors instead of applying them to the bodies and moving them.
 			if (info[j].m > 0)
 			{
-			dInternalStepFast (world, bodyPair, GIPair, GinvIPair, joint, info[j], Jinfo[j], ministep);
+				switch( joints[j]->vtable->typenum ) 
+				{
+				case dJointTypeContact: 
+					if(info[j].m==3){
+						dInternalStepJointContact (world, bodyPair, GIPair, GinvIPair, joint, info[j], Jinfo[j], ministep); 
+						//dInternalStepFast (world, bodyPair, GIPair, GinvIPair, joint, info[j], Jinfo[j], ministep);
+						
+						break;
+					};
+
+				default: dInternalStepFast (world, bodyPair, GIPair, GinvIPair, joint, info[j], Jinfo[j], ministep);
+				}
 			}		
 		}
 		//  }
@@ -902,8 +806,23 @@ dInternalStepIslandFast (dxWorld * world, dxBody * const *bodies, int nb, dxJoin
 
 			for (i = 0; i < 4; i++)
 			{
+#ifdef			NOISING
+				const dReal RAND_MAX_2=16383;
+				const dReal NOISE_EPSILON=0.000000831f;
+#define NOISE()	(1.f+(RAND_MAX_2-rand()%RAND_MAX)*NOISE_EPSILON)
+				dReal noise=NOISE();
+				dReal mul=ministep*noise;
+				body->facc[i] *= mul;
+				noise=NOISE();
+				mul=ministep*noise;
+				body->tacc[i] *= mul;
+#else
+				
 				body->facc[i] *= ministep;
 				body->tacc[i] *= ministep;
+				
+#endif
+
 			}
 
 			//apply torque
@@ -935,8 +854,6 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 	if (world->nb <= 0)
 		return;
 
-	dInternalHandleAutoDisabling (world,stepsize);
-
 #	ifdef TIMING
 	dTimerStart ("creating joint and body arrays");
 #	endif
@@ -951,9 +868,14 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 
 	int nb = 0;
 	for (body = world->firstbody; body; body = (dxBody *) body->next)
+	{
+		body->flags &= ~dxBodyDisabled;
 		bodies[nb++] = body;
 
-	dInternalStepIslandFast (world, bodies, nb, joints, nj, stepsize, maxiterations);
+	}
+
+	if (nj>3)		dInternalStepIslandFast (world, bodies, nb, joints, nj, stepsize, maxiterations);
+	else			dInternalStepIsland		(world, bodies, nb, joints, nj, stepsize);		
 #	ifdef TIMING
 	dTimerEnd ();
 	dTimerReport (stdout, 1);
@@ -975,7 +897,8 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 // never start a new islands from a disabled body. thus islands of disabled
 // bodies will not be included in the simulation. disabled bodies are
 // re-enabled if they are found to be part of an active island.
-
+const int MAXJ_ALLOC= 2000;
+//const int MAXB_ALLOC= 1000;
 static void
 processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 {
@@ -988,17 +911,16 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 	// nothing to do if no bodies
 	if (world->nb <= 0)
 		return;
-
-	dInternalHandleAutoDisabling (world,stepsize);
-
+	int jalloc=world->nj<MAXJ_ALLOC ? world->nj : MAXJ_ALLOC;
+	int balloc=world->nb;//<MAXB_ALLOC ? world->nb : MAXB_ALLOC;
 	// make arrays for body and joint lists (for a single island) to go into
-	body = (dxBody **) ALLOCA (world->nb * sizeof (dxBody *));
-	joint = (dxJoint **) ALLOCA (world->nj * sizeof (dxJoint *));
+	body = (dxBody **) ALLOCA (balloc * sizeof (dxBody *));
+	joint = (dxJoint **) ALLOCA (jalloc * sizeof (dxJoint *));
 	int bcount = 0;				// number of bodies in `body'
 	int jcount = 0;				// number of joints in `joint'
 	int tbcount = 0;
 	int tjcount = 0;
-	
+
 	// set all body/joint tags to 0
 	for (b = world->firstbody; b; b = (dxBody *) b->next)
 		b->tag = 0;
@@ -1009,7 +931,7 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 	// the stack can be the lesser of the number of bodies or joints, because
 	// new bodies are only ever added to the stack by going through untagged
 	// joints. all the bodies in the stack must be tagged!
-	int stackalloc = (world->nj < world->nb) ? world->nj : world->nb;
+	int stackalloc = (jalloc < balloc) ? jalloc : balloc;
 	dxBody **stack = (dxBody **) ALLOCA (stackalloc * sizeof (dxBody *));
 	int *autostack = (int *) ALLOCA (stackalloc * sizeof (int));
 
@@ -1036,8 +958,8 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 			b = stack[--stacksize];	// pop body off stack
 			autoDepth = autostack[stacksize];
 			body[bcount++] = b;	// put body on body list
-		  quickstart:
 
+quickstart:
 			// traverse and tag all body's joints, add untagged connected bodies
 			// to stack
 			for (dxJointNode * n = b->firstjoint; n; n = n->next)
@@ -1045,8 +967,10 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 				if (!n->joint->tag)
 				{
 					int thisDepth = autoEnableDepth;
+					
 					n->joint->tag = 1;
-					joint[jcount++] = n->joint;
+					if(jcount!=jalloc)
+						joint[jcount++] = n->joint;
 					if (n->body && !n->body->tag)
 					{
 						if (n->body->flags & dxBodyDisabled)
@@ -1060,12 +984,13 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 					}
 				}
 			}
-			dIASSERT (stacksize <= world->nb);
-			dIASSERT (stacksize <= world->nj);
+			dIASSERT (stacksize <= balloc);
+			dIASSERT (stacksize <= jalloc);
 		}
-
+quit:
 		// now do something with body and joint lists
-		dInternalStepIslandFast (world, body, bcount, joint, jcount, stepsize, maxiterations);
+		if (jcount>3)	dInternalStepIslandFast (world, body, bcount, joint, jcount, stepsize, maxiterations);
+		else			dInternalStepIsland		(world, body, bcount, joint, jcount, stepsize);		
 
 		// what we've just done may have altered the body/joint tag values.
 		// we must make sure that these tags are nonzero.
@@ -1078,11 +1003,11 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 		}
 		for (i = 0; i < jcount; i++)
 			joint[i]->tag = 1;
-		
+
 		tbcount += bcount;
 		tjcount += jcount;
 	}
-	
+
 #ifdef TIMING
 	dMessage(0, "Total joints processed: %i, bodies: %i", tjcount, tbcount);
 #endif
@@ -1108,8 +1033,8 @@ processIslandsFast (dxWorld * world, dReal stepsize, int maxiterations)
 	{
 		if ((j->node[0].body && (j->node[0].body->flags & dxBodyDisabled) == 0) || (j->node[1].body && (j->node[1].body->flags & dxBodyDisabled) == 0))
 		{
-			if (!j->tag)
-				dDebug (0, "attached enabled joint not tagged");
+			//if (!j->tag)
+				//dDebug (0, "attached enabled joint not tagged");
 		}
 		else
 		{

@@ -41,7 +41,6 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 
 #define BAN_OPCODE_AUTOLINK
 #include "Opcode.h"
-using namespace Opcode;
 
 struct dxTriMeshData{
 	Model BVTree;

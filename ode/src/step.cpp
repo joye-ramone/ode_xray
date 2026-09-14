@@ -497,7 +497,10 @@ void dInternalStepIsland_x1 (dxWorld *world, dxBody * const *body, int nb,
 # ifdef TIMING
   dTimerNow ("update position");
 # endif
-  for (i=0; i<nb; i++) dxStepBody (body[i],stepsize);
+  for (i = 0; i < nb; i++) {
+      if ((body[i]->flags & dxBodyNoUpdatePos) == 0)
+          dxStepBody(body[i], stepsize);
+  }
 
 # ifdef TIMING
   dTimerNow ("tidy up");
@@ -744,15 +747,16 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
 	  // get joint numbers and ensure ofs[j1] >= ofs[j2]
 	  int j1 = n1->joint->tag;
 	  int j2 = n2->joint->tag;
+
+	  // if either joint was tagged as -1 then it is an inactive (m=0)
+	  // joint that should not be considered
+	  if (j1 == -1 || j2 == -1) continue;
+
 	  if (ofs[j1] < ofs[j2]) {
 	    int tmp = j1;
 	    j1 = j2;
 	    j2 = tmp;
 	  }
-
-	  // if either joint was tagged as -1 then it is an inactive (m=0)
-	  // joint that should not be considered
-	  if (j1==-1 || j2==-1) continue;
 
 	  // determine if body i is the 1st or 2nd body of joints j1 and j2
 	  int jb1 = (joint[j1]->node[1].body == body[i]);
@@ -923,8 +927,17 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
   for (i=0; i<nb; i++) {
     dReal body_invMass = body[i]->invMass;
     dReal *body_invI = invI + i*12;
-    for (j=0; j<3; j++) body[i]->lvel[j] += body_invMass * cforce[i*8+j];
-    dMULTIPLYADD0_331 (body[i]->avel,body_invI,cforce+i*8+4);
+    for (j=0; j<3; j++)
+	{
+		float &lf=cforce[i*8+j];
+		if(!dValid(lf))
+			lf=0.f;
+		float &af=cforce[i*8+4+j];
+		if(!dValid(af))af=0.f;
+		body[i]->lvel[j] += body_invMass * cforce[i*8+j];
+	}
+		dMULTIPLYADD0_331 (body[i]->avel,body_invI,cforce+i*8+4);
+	
   }
 
   // update the position and orientation from the new linear/angular velocity
@@ -968,7 +981,7 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
 //****************************************************************************
 
 void dInternalStepIsland (dxWorld *world, dxBody * const *body, int nb,
-			  dxJoint * const *joint, int nj, dReal stepsize)
+			  dxJoint **joint, int nj, dReal stepsize)
 {
 # ifndef COMPARE_METHODS
   dInternalStepIsland_x2 (world,body,nb,joint,nj,stepsize);

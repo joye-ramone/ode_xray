@@ -27,7 +27,7 @@
 #define _ODE_ODECPP_COLLISION_H_
 #ifdef __cplusplus
 
-#include <ode/error.h>
+#include "error.h"
 
 
 class dGeom {
@@ -79,7 +79,7 @@ public:
     { dGeomSetRotation (_id,R); }
   const dReal * getRotation() const
     { return dGeomGetRotation (_id); }
-    
+
   void setQuaternion (const dQuaternion quat)
     { dGeomSetQuaternion (_id,quat); }
   void getQuaternion (dQuaternion quat) const

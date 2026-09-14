@@ -23,9 +23,9 @@
 #ifndef _ODE_COLLISION_H_
 #define _ODE_COLLISION_H_
 
-#include <ode/common.h>
-#include <ode/collision_space.h>
-#include <ode/contact.h>
+#include "common.h"
+#include "collision_space.h"
+#include "contact.h"
 
 #ifdef __cplusplus
 extern "C" {
