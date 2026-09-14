@@ -50,7 +50,7 @@ typical errors for each test cycle are about 1e-5 ... 1e-4.
 #define dsDrawBox dsDrawBoxD
 #define dsDrawSphere dsDrawSphereD
 #define dsDrawCylinder dsDrawCylinderD
-#define dsDrawCappedCylinder dsDrawCappedCylinderD
+#define dsDrawCapsule dsDrawCapsuleD
 #endif
 
 
@@ -236,7 +236,12 @@ int main (int argc, char **argv)
   fn.command = 0;
   fn.stop = 0;
   fn.path_to_textures = "../../drawstuff/textures";
+  if(argc==2)
+    {
+        fn.path_to_textures = argv[1];
+    }
 
+  dInitODE();
   dRandSetSeed (time(0));
   reset_test();
 
@@ -244,5 +249,6 @@ int main (int argc, char **argv)
   dsSimulationLoop (argc,argv,352,288,&fn);
 
   dWorldDestroy (world);
+  dCloseODE();
   return 0;
 }

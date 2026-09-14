@@ -29,6 +29,7 @@ the standard ODE geometry primitives.
 #ifndef _ODE_COLLISION_STD_H_
 #define _ODE_COLLISION_STD_H_
 
+#include <set>
 #include <ode/common.h>
 #include "collision_kernel.h"
 
@@ -47,22 +48,125 @@ int dCollideBoxBox (dxGeom *o1, dxGeom *o2, int flags,
 		    dContactGeom *contact, int skip);
 int dCollideBoxPlane (dxGeom *o1, dxGeom *o2,
 		      int flags, dContactGeom *contact, int skip);
-int dCollideCCylinderSphere (dxGeom *o1, dxGeom *o2, int flags,
+int dCollideCapsuleSphere (dxGeom *o1, dxGeom *o2, int flags,
 			     dContactGeom *contact, int skip);
-int dCollideCCylinderBox (dxGeom *o1, dxGeom *o2, int flags,
+int dCollideCapsuleBox (dxGeom *o1, dxGeom *o2, int flags,
 			  dContactGeom *contact, int skip);
-int dCollideCCylinderCCylinder (dxGeom *o1, dxGeom *o2,
+int dCollideCapsuleCapsule (dxGeom *o1, dxGeom *o2,
 				int flags, dContactGeom *contact, int skip);
-int dCollideCCylinderPlane (dxGeom *o1, dxGeom *o2, int flags,
+int dCollideCapsulePlane (dxGeom *o1, dxGeom *o2, int flags,
 			    dContactGeom *contact, int skip);
 int dCollideRaySphere (dxGeom *o1, dxGeom *o2, int flags,
 		       dContactGeom *contact, int skip);
 int dCollideRayBox (dxGeom *o1, dxGeom *o2, int flags,
 		    dContactGeom *contact, int skip);
-int dCollideRayCCylinder (dxGeom *o1, dxGeom *o2,
+int dCollideRayCapsule (dxGeom *o1, dxGeom *o2,
 			  int flags, dContactGeom *contact, int skip);
 int dCollideRayPlane (dxGeom *o1, dxGeom *o2, int flags,
 		      dContactGeom *contact, int skip);
+int dCollideRayCylinder (dxGeom *o1, dxGeom *o2, int flags,
+		      dContactGeom *contact, int skip);
+
+// Cylinder - Box/Sphere by (C) CroTeam
+// Ported by Nguyen Binh
+int dCollideCylinderBox(dxGeom *o1, dxGeom *o2, 
+                        int flags, dContactGeom *contact, int skip);
+int dCollideCylinderSphere(dxGeom *gCylinder, dxGeom *gSphere, 
+                           int flags, dContactGeom *contact, int skip); 
+int dCollideCylinderPlane(dxGeom *gCylinder, dxGeom *gPlane, 
+                           int flags, dContactGeom *contact, int skip); 
+
+//--> Convex Collision
+int dCollideConvexPlane (dxGeom *o1, dxGeom *o2, int flags,
+			 dContactGeom *contact, int skip);
+int dCollideSphereConvex (dxGeom *o1, dxGeom *o2, int flags,
+			  dContactGeom *contact, int skip);
+int dCollideConvexBox (dxGeom *o1, dxGeom *o2, int flags,
+		       dContactGeom *contact, int skip);
+int dCollideConvexCapsule (dxGeom *o1, dxGeom *o2,
+			   int flags, dContactGeom *contact, int skip);
+int dCollideConvexConvex (dxGeom *o1, dxGeom *o2, int flags, 
+			  dContactGeom *contact, int skip);
+int dCollideRayConvex (dxGeom *o1, dxGeom *o2, int flags, 
+		       dContactGeom *contact, int skip);
+//<-- Convex Collision
+
+// dHeightfield
+int dCollideHeightfield( dxGeom *o1, dxGeom *o2, 
+						 int flags, dContactGeom *contact, int skip );
+
+//****************************************************************************
+// the basic geometry objects
+
+struct dxSphere : public dxGeom {
+  dReal radius;		// sphere radius
+  dxSphere (dSpaceID space, dReal _radius);
+  void computeAABB();
+};
+
+
+struct dxBox : public dxGeom {
+  dVector3 side;	// side lengths (x,y,z)
+  dxBox (dSpaceID space, dReal lx, dReal ly, dReal lz);
+  void computeAABB();
+};
+
+
+struct dxCapsule : public dxGeom {
+  dReal radius,lz;	// radius, length along z axis
+  dxCapsule (dSpaceID space, dReal _radius, dReal _length);
+  void computeAABB();
+};
+
+
+struct dxCylinder : public dxGeom {
+        dReal radius,lz;        // radius, length along z axis
+        dxCylinder (dSpaceID space, dReal _radius, dReal _length);
+        void computeAABB();
+};
+
+
+struct dxPlane : public dxGeom {
+  dReal p[4];
+  dxPlane (dSpaceID space, dReal a, dReal b, dReal c, dReal d);
+  void computeAABB();
+};
+
+
+struct dxRay : public dxGeom {
+  dReal length;
+  dxRay (dSpaceID space, dReal _length);
+  void computeAABB();
+};
+
+typedef std::pair<unsigned int,unsigned int> edge; /*!< Used to descrive a convex hull edge, an edge is a pair or indices into the hull's points */
+struct dxConvex : public dxGeom 
+{
+  
+  dReal *planes; /*!< An array of planes in the form:
+		   normal X, normal Y, normal Z,Distance
+		 */
+  dReal *points; /*!< An array of points X,Y,Z */  
+  unsigned int *polygons; /*! An array of indices to the points of each polygon, it should be the number of vertices followed by that amount of indices to "points" in counter clockwise order*/
+  unsigned int planecount; /*!< Amount of planes in planes */
+  unsigned int pointcount;/*!< Amount of points in points */
+  dReal saabb[6];/*!< Static AABB */
+  std::set<edge> edges;
+  dxConvex(dSpaceID space,
+	   dReal *planes,
+	   unsigned int planecount,
+	   dReal *points,
+	   unsigned int pointcount,
+	   unsigned int *polygons);
+  ~dxConvex()
+  {
+    //fprintf(stdout,"dxConvex Destroy\n");
+  }
+  void computeAABB();
+  private:
+  // For Internal Use Only
+  void FillEdges();
+};
 
 
 #endif

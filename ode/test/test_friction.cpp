@@ -57,7 +57,7 @@ slide.
 #define dsDrawBox dsDrawBoxD
 #define dsDrawSphere dsDrawSphereD
 #define dsDrawCylinder dsDrawCylinderD
-#define dsDrawCappedCylinder dsDrawCappedCylinderD
+#define dsDrawCapsule dsDrawCapsuleD
 #endif
 
 
@@ -168,8 +168,13 @@ int main (int argc, char **argv)
   fn.command = 0;
   fn.stop = 0;
   fn.path_to_textures = "../../drawstuff/textures";
+  if(argc==2)
+    {
+        fn.path_to_textures = argv[1];
+    }
 
   // create world
+  dInitODE();
   world = dWorldCreate();
   space = dHashSpaceCreate (0);
   contactgroup = dJointGroupCreate (0);
@@ -196,6 +201,6 @@ int main (int argc, char **argv)
   dJointGroupDestroy (contactgroup);
   dSpaceDestroy (space);
   dWorldDestroy (world);
-
+  dCloseODE();
   return 0;
 }

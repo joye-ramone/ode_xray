@@ -31,27 +31,42 @@ extern "C" {
 
 struct dContactGeom;
 
+/**
+ * @brief User callback for geom-geom collision testing.
+ *
+ * @param data The user data object, as passed to dSpaceCollide.
+ * @param o1   The first geom being tested.
+ * @param o2   The second geom being test.
+ *
+ * @remarks The callback function can call dCollide on o1 and o2 to generate 
+ * contact points between each pair. Then these contact points may be added 
+ * to the simulation as contact joints. The user's callback function can of 
+ * course chose not to call dCollide for any pair, e.g. if the user decides 
+ * that those pairs should not interact.
+ *
+ * @ingroup collide
+ */
 typedef void dNearCallback (void *data, dGeomID o1, dGeomID o2);
 
 
-dSpaceID dSimpleSpaceCreate (dSpaceID space);
-dSpaceID dHashSpaceCreate (dSpaceID space);
-dSpaceID dQuadTreeSpaceCreate (dSpaceID space, dVector3 Center, dVector3 Extents, int Depth);
+ODE_API dSpaceID dSimpleSpaceCreate (dSpaceID space);
+ODE_API dSpaceID dHashSpaceCreate (dSpaceID space);
+ODE_API dSpaceID dQuadTreeSpaceCreate (dSpaceID space, dVector3 Center, dVector3 Extents, int Depth);
 
-void dSpaceDestroy (dSpaceID);
+ODE_API void dSpaceDestroy (dSpaceID);
 
-void dHashSpaceSetLevels (dSpaceID space, int minlevel, int maxlevel);
-void dHashSpaceGetLevels (dSpaceID space, int *minlevel, int *maxlevel);
+ODE_API void dHashSpaceSetLevels (dSpaceID space, int minlevel, int maxlevel);
+ODE_API void dHashSpaceGetLevels (dSpaceID space, int *minlevel, int *maxlevel);
 
-void dSpaceSetCleanup (dSpaceID space, int mode);
-int dSpaceGetCleanup (dSpaceID space);
+ODE_API void dSpaceSetCleanup (dSpaceID space, int mode);
+ODE_API int dSpaceGetCleanup (dSpaceID space);
 
-void dSpaceAdd (dSpaceID, dGeomID);
-void dSpaceRemove (dSpaceID, dGeomID);
-int dSpaceQuery (dSpaceID, dGeomID);
-void dSpaceClean (dSpaceID);
-int dSpaceGetNumGeoms (dSpaceID);
-dGeomID dSpaceGetGeom (dSpaceID, int i);
+ODE_API void dSpaceAdd (dSpaceID, dGeomID);
+ODE_API void dSpaceRemove (dSpaceID, dGeomID);
+ODE_API int dSpaceQuery (dSpaceID, dGeomID);
+ODE_API void dSpaceClean (dSpaceID);
+ODE_API int dSpaceGetNumGeoms (dSpaceID);
+ODE_API dGeomID dSpaceGetGeom (dSpaceID, int i);
 
 
 #ifdef __cplusplus

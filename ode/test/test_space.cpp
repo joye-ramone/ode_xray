@@ -46,7 +46,7 @@ testing procedure:
 #define dsDrawBox dsDrawBoxD
 #define dsDrawSphere dsDrawSphereD
 #define dsDrawCylinder dsDrawCylinderD
-#define dsDrawCappedCylinder dsDrawCappedCylinderD
+#define dsDrawCapsule dsDrawCapsuleD
 #endif
 
 
@@ -60,9 +60,9 @@ testing procedure:
 static dSpaceID space;
 static dGeomID geom[NUM];
 static dReal bounds[NUM][6];
-static int good_matrix[NUM][NUM];	// correct collision matrix
-static int test_matrix[NUM][NUM];	// testing collision matrix
-static int hits[NUM];			// number of collisions a box has
+static size_t good_matrix[NUM][NUM];	// correct collision matrix
+static size_t test_matrix[NUM][NUM];	// testing collision matrix
+static size_t hits[NUM];		// number of collisions a box has
 static unsigned long seed=37;
 
 
@@ -90,7 +90,7 @@ static void init_test()
 		      (bounds[i][0] + bounds[i][1])*0.5,
 		      (bounds[i][2] + bounds[i][3])*0.5,
 		      (bounds[i][4] + bounds[i][5])*0.5);
-    dGeomSetData (geom[i],(void*) (i));
+    dGeomSetData (geom[i],(void*)(size_t)(i));
   }
 
   // compute all intersections and put the results in "good_matrix"
@@ -123,9 +123,9 @@ static void init_test()
 
 static void nearCallback (void *data, dGeomID o1, dGeomID o2)
 {
-  int i,j;
-  i = (int) dGeomGetData (o1);
-  j = (int) dGeomGetData (o2);
+  size_t i,j;
+  i = (size_t) dGeomGetData (o1);
+  j = (size_t) dGeomGetData (o2);
   if (i==j)
     printf ("collision (%d,%d) is between the same object\n",i,j);
   if (!good_matrix[i][j] || !good_matrix[j][i])
@@ -202,6 +202,12 @@ int main (int argc, char **argv)
   fn.command = &command;
   fn.stop = 0;
   fn.path_to_textures = "../../drawstuff/textures";
+  if(argc==2)
+    {
+        fn.path_to_textures = argv[1];
+    }
+
+  dInitODE();
 
   // test the simple space:
   // space = dSimpleSpaceCreate();
@@ -222,5 +228,6 @@ int main (int argc, char **argv)
   dsSimulationLoop (argc,argv,352,288,&fn);
 
   dSpaceDestroy (space);
+  dCloseODE();
   return 0;
 }

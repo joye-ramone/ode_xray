@@ -36,7 +36,7 @@
 #define dsDrawBox dsDrawBoxD
 #define dsDrawSphere dsDrawSphereD
 #define dsDrawCylinder dsDrawCylinderD
-#define dsDrawCappedCylinder dsDrawCappedCylinderD
+#define dsDrawCapsule dsDrawCapsuleD
 #endif
 
 
@@ -61,7 +61,7 @@
 #define COLS 1			// columns of cars
 #define ITERS 20		// number of iterations
 #define WBOXSIZE 1.0		// size of wall boxes
-#define WALLWIDTH 20		// width of wall
+#define WALLWIDTH 12		// width of wall
 #define WALLHEIGHT 10		// height of wall
 #define DISABLE_THRESHOLD 0.008	// maximum velocity (squared) a body can have and be disabled
 #define DISABLE_STEPS 10	// number of steps a box has to have been disable-able before it will be disabled
@@ -610,7 +610,13 @@ int main (int argc, char **argv)
 	fn.command = &command;
 	fn.stop = 0;
 	fn.path_to_textures = "../../drawstuff/textures";
+  if(argc==2)
+    {
+        fn.path_to_textures = argv[1];
+    }
 	
+	dInitODE();
+
 	bodies = 0;
 	joints = 0;
 	boxes = 0;
@@ -624,6 +630,6 @@ int main (int argc, char **argv)
 	dJointGroupDestroy (contactgroup);
 	dSpaceDestroy (space);
 	dWorldDestroy (world);
-
+	dCloseODE();
 	return 0;
 }

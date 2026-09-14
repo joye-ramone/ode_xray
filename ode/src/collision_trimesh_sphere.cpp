@@ -28,33 +28,16 @@
 #include <ode/odemath.h>
 #include "collision_util.h"
 
+#if dTRIMESH_ENABLED
+
 #define TRIMESH_INTERNAL
 #include "collision_trimesh_internal.h"
 
+#if dTRIMESH_OPCODE
 #define MERGECONTACTS
 
 // Ripped from Opcode 1.1.
 static bool GetContactData(const dVector3& Center, dReal Radius, const dVector3 Origin, const dVector3 Edge0, const dVector3 Edge1, dReal& Dist, float& u, float& v){
-	//calculate plane of triangle
-	dVector4 Plane;
-	dCROSS(Plane, =, Edge0, Edge1);
-	Plane[3] = dDOT(Plane, Origin);
- 
-	//normalize
-        dNormalize4(Plane);
-  
-	/* If the center of the sphere is within the positive halfspace of the
-         * triangle's plane, allow a contact to be generated.
-         * If the center of the sphere made it into the positive halfspace of a
-         * back-facing triangle, then the physics update and/or velocity needs
-         * to be adjusted (penetration has occured anyway).
-         */
-  
-	float side = dDOT(Plane,Center) - Plane[3];
-  
-	if(side < 0.0f) {
-		return false;
-        }
   
         // now onto the bulk of the collision...
 
@@ -64,20 +47,20 @@ static bool GetContactData(const dVector3& Center, dReal Radius, const dVector3 
 	Diff[2] = Origin[2] - Center[2];
 	Diff[3] = Origin[3] - Center[3];
 
-	float A00 = dDOT(Edge0, Edge0);
-	float A01 = dDOT(Edge0, Edge1);
-	float A11 = dDOT(Edge1, Edge1);
+	float A00 = (float)dDOT(Edge0, Edge0);
+	float A01 = (float)dDOT(Edge0, Edge1);
+	float A11 = (float)dDOT(Edge1, Edge1);
 
-	float B0 = dDOT(Diff, Edge0);
-	float B1 = dDOT(Diff, Edge1);
+	float B0 = (float)dDOT(Diff, Edge0);
+	float B1 = (float)dDOT(Diff, Edge1);
 
-	float C = dDOT(Diff, Diff);
+	float C = (float)dDOT(Diff, Diff);
 
-	float Det = dFabs(A00 * A11 - A01 * A01);
+	float Det = (float)dFabs(A00 * A11 - A01 * A01);
 	u = A01 * B1 - A11 * B0;
 	v = A01 * B0 - A00 * B1;
 
-	float DistSq;
+	dReal DistSq;
 
 	if (u + v <= Det){
 		if(u < REAL(0.0)){
@@ -148,7 +131,7 @@ static bool GetContactData(const dVector3& Center, dReal Radius, const dVector3 
 				DistSq = FLT_MAX;
 			}
 			else{
-				float InvDet = REAL(1.0) / Det;
+				dReal InvDet = REAL(1.0) / Det;
 				u *= InvDet;
 				v *= InvDet;
 				DistSq = u * (A00 * u + A01 * v + REAL(2.0) * B0) + v * (A01 * u + A11 * v + REAL(2.0) * B1) + C;
@@ -156,7 +139,7 @@ static bool GetContactData(const dVector3& Center, dReal Radius, const dVector3 
 		}
 	}
 	else{
-		float Tmp0, Tmp1, Numer, Denom;
+		dReal Tmp0, Tmp1, Numer, Denom;
 
 		if(u < REAL(0.0)){  // region 2
 			Tmp0 = A01 + B0;
@@ -305,6 +288,11 @@ int dCollideSTL(dxGeom* g1, dxGeom* SphereGeom, int Flags, dContactGeom* Contact
 						 &MakeMatrix(TLPosition, TLRotation, amatrix));
  	}
 
+	if (! Collider.GetContactStatus()) {
+		// no collision occurred
+		return 0;
+	}
+
 	// get results
 	int TriCount = Collider.GetNbTouchedPrimitives();
 	const int* Triangles = (const int*)Collider.GetTouchedPrimitives();
@@ -323,6 +311,8 @@ int dCollideSTL(dxGeom* g1, dxGeom* SphereGeom, int Flags, dContactGeom* Contact
 			const int& TriIndex = Triangles[i];
 
 			dVector3 dv[3];
+			if (!Callback(TriMesh, SphereGeom, TriIndex))
+				continue;
 			FetchTriangle(TriMesh, TriIndex, TLPosition, TLRotation, dv);
 
 			dVector3& v0 = dv[0];
@@ -341,12 +331,35 @@ int dCollideSTL(dxGeom* g1, dxGeom* SphereGeom, int Flags, dContactGeom* Contact
 			vv[2] = v2[2] - v0[2];
 			vv[3] = REAL(0.0);
 
+			// Get plane coefficients
+			dVector4 Plane;
+			dCROSS(Plane, =, vu, vv);
+
+			dReal Area = dSqrt(dDOT(Plane, Plane));	// We can use this later
+			Plane[0] /= Area;
+			Plane[1] /= Area;
+			Plane[2] /= Area;
+
+			Plane[3] = dDOT(Plane, v0);	
+
+			/* If the center of the sphere is within the positive halfspace of the
+				* triangle's plane, allow a contact to be generated.
+				* If the center of the sphere made it into the positive halfspace of a
+				* back-facing triangle, then the physics update and/or velocity needs
+				* to be adjusted (penetration has occured anyway).
+				*/
+		  
+			float side = dDOT(Plane,Position) - Plane[3];
+
+			if(side < 0.0f) {
+				continue;
+			}
+
 			dReal Depth;
 			float u, v;
 			if (!GetContactData(Position, Radius, v0, vu, vv, Depth, u, v)){
 				continue;	// Sphere doesnt hit triangle
 			}
-			dReal w = REAL(1.0) - u - v;
 
 			if (Depth < REAL(0.0)){
 				Depth = REAL(0.0);
@@ -354,27 +367,29 @@ int dCollideSTL(dxGeom* g1, dxGeom* SphereGeom, int Flags, dContactGeom* Contact
 
 			dContactGeom* Contact = SAFECONTACT(Flags, Contacts, OutTriCount, Stride);
 
+			dReal w = REAL(1.0) - u - v;
 			Contact->pos[0] = (v0[0] * w) + (v1[0] * u) + (v2[0] * v);
 			Contact->pos[1] = (v0[1] * w) + (v1[1] * u) + (v2[1] * v);
 			Contact->pos[2] = (v0[2] * w) + (v1[2] * u) + (v2[2] * v);
 			Contact->pos[3] = REAL(0.0);
 
-			dVector4 Plane;
-			dCROSS(Plane, =, vv, vu);	// Reversed
-			Plane[3] = dDOT(Plane, v0);	// Using normal as plane.
-
-			dReal Area = dSqrt(dDOT(Plane, Plane));	// We can use this later
-			Plane[0] /= Area;
-			Plane[1] /= Area;
-			Plane[2] /= Area;
-			Plane[3] /= Area;
-
-			Contact->normal[0] = Plane[0];
-			Contact->normal[1] = Plane[1];
-			Contact->normal[2] = Plane[2];
+			// Using normal as plane (reversed)
+			Contact->normal[0] = -Plane[0];
+			Contact->normal[1] = -Plane[1];
+			Contact->normal[2] = -Plane[2];
 			Contact->normal[3] = REAL(0.0);
 
-			Contact->depth = Depth;
+			// Depth returned from GetContactData is depth along 
+			// contact point - sphere center direction
+			// we'll project it to contact normal
+			dVector3 dir;
+			dir[0] = Position[0]-Contact->pos[0];
+			dir[1] = Position[1]-Contact->pos[1];
+			dir[2] = Position[2]-Contact->pos[2];
+			dReal dirProj = dDOT(dir, Plane) / dSqrt(dDOT(dir, dir));
+			Contact->depth = Depth * dirProj;
+			//Contact->depth = Radius - side; // (mg) penetration depth is distance along normal not shortest distance
+			Contact->side1 = TriIndex;
 
 			//Contact->g1 = TriMesh;
 			//Contact->g2 = SphereGeom;
@@ -418,6 +433,10 @@ int dCollideSTL(dxGeom* g1, dxGeom* SphereGeom, int Flags, dContactGeom* Contact
 
 			Contact->g1 = TriMesh;
 			Contact->g2 = SphereGeom;
+
+			// TODO:
+			// Side1 now contains index of triangle that gave first hit
+			// Probably we should find index of triangle with deepest penetration
 
 			return 1;
 		}
@@ -481,3 +500,61 @@ int dCollideSTL(dxGeom* g1, dxGeom* SphereGeom, int Flags, dContactGeom* Contact
 	}
 	else return 0;
 }
+#endif // dTRIMESH_OPCODE
+
+#if dTRIMESH_GIMPACT
+int dCollideSTL(dxGeom* g1, dxGeom* SphereGeom, int Flags, dContactGeom* Contacts, int Stride)
+{
+	dxTriMesh* TriMesh = (dxTriMesh*)g1;
+    dVector3& Position = *(dVector3*)dGeomGetPosition(SphereGeom);
+	dReal Radius = dGeomSphereGetRadius(SphereGeom);
+ //Create contact list
+    GDYNAMIC_ARRAY trimeshcontacts;
+    GIM_CREATE_CONTACT_LIST(trimeshcontacts);
+
+    //Collide trimeshes
+    gim_trimesh_sphere_collision(&TriMesh->m_collision_trimesh,Position,Radius,&trimeshcontacts);
+
+    if(trimeshcontacts.m_size == 0)
+    {
+        GIM_DYNARRAY_DESTROY(trimeshcontacts);
+        return 0;
+    }
+
+    GIM_CONTACT * ptrimeshcontacts = GIM_DYNARRAY_POINTER(GIM_CONTACT,trimeshcontacts);
+
+    dContactGeom* pcontact;
+	int contactcount = 0;
+	unsigned i;
+
+	for (i=0;i<trimeshcontacts.m_size;i++)
+	{
+	    if(contactcount < (Flags & 0xffff))
+        {
+            pcontact = SAFECONTACT(Flags, Contacts, contactcount, Stride);
+            contactcount++;
+            pcontact->pos[0] = ptrimeshcontacts->m_point[0];
+            pcontact->pos[1] = ptrimeshcontacts->m_point[1];
+            pcontact->pos[2] = ptrimeshcontacts->m_point[2];
+            pcontact->pos[3] = 1.0f;
+
+            pcontact->normal[0] = ptrimeshcontacts->m_normal[0];
+            pcontact->normal[1] = ptrimeshcontacts->m_normal[1];
+            pcontact->normal[2] = ptrimeshcontacts->m_normal[2];
+            pcontact->normal[3] = 0;
+
+            pcontact->depth = ptrimeshcontacts->m_depth;
+            pcontact->g1 = g1;
+            pcontact->g2 = SphereGeom;
+
+        }
+        ptrimeshcontacts++;
+	}
+
+	GIM_DYNARRAY_DESTROY(trimeshcontacts);
+
+    return contactcount;
+}
+#endif // dTRIMESH_GIMPACT
+
+#endif // dTRIMESH_ENABLED
