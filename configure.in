@@ -1,12 +1,12 @@
 dnl Initial configure.in by Rodrigo Hernandez
 dnl Modified in 26/10/2005 by Rodrigo Hernandez
 
-dnl AC_INIT does not take a macro as a version nr: set it seperately! - Bram
-AC_INIT(ODE,0.8,ode@ode.org)
+dnl AC_INIT does not take a macro as a version nr: set it separately! - Bram
+AC_INIT(ODE,0.9.0,ode@ode.org)
 
 dnl When upgrading version nr, also change the AC_INIT line! - Bram
 ODE_CURRENT=0
-ODE_REVISION=8
+ODE_REVISION=9
 ODE_AGE=0
 ODE_RELEASE=[$ODE_CURRENT].[$ODE_REVISION].[$ODE_AGE]
 AC_CANONICAL_HOST
@@ -14,6 +14,9 @@ AC_CANONICAL_TARGET
 
 AM_INIT_AUTOMAKE(ODE,[$ODE_RELEASE])
 AM_CONFIG_HEADER(include/ode/config.h)
+dnl Set CFLAGS to zero, so that we avoid getting the gratis -g -O2
+CFLAGS=
+CXXFLAGS=
 AC_C_BIGENDIAN
 AC_PATH_X
 AC_PATH_XTRA
@@ -49,11 +52,11 @@ AC_MSG_RESULT($use_soname)
 AM_CONDITIONAL(USE_SONAME, test x$use_soname = xyes)
 
 
-dnl Check if we want to build tests
+dnl Check if we want to build demos
 AC_MSG_CHECKING(if tests should be built)
-AC_ARG_ENABLE(tests,AC_HELP_STRING([--enable-tests], [build tests]), enable_tests=$enableval,enable_tests=yes)
-AC_MSG_RESULT($enable_tests)
-AM_CONDITIONAL(ENABLE_TESTS, test x$enable_tests = xyes)
+AC_ARG_ENABLE(demos,AC_HELP_STRING([--enable-demos], [build tests]), enable_demos=$enableval,enable_demos=yes)
+AC_MSG_RESULT($enable_demos)
+AM_CONDITIONAL(ENABLE_DEMOS, test x$enable_demos = xyes)
 
 
 AC_ARG_WITH(arch,AC_HELP_STRING([--with-arch=[arch]],
@@ -305,8 +308,8 @@ AC_MSG_RESULT($release)
 
 AC_MSG_CHECKING(if building a debug library)
 AC_ARG_ENABLE(debug,AC_HELP_STRING([--enable-debug],
-[build a debug library with -g]),
-debug=$enableval,debug=no)
+[Add debug symbols to the library with -g]),
+debug=$enableval,debug=yes)
 if test "x$debug" == xyes
 then
     CFLAGS="$CFLAGS -g"
@@ -545,7 +548,9 @@ AC_OUTPUT([
  drawstuff/Makefile
  drawstuff/src/Makefile
  drawstuff/dstest/Makefile
- ode/test/Makefile
+ ode/demo/Makefile
+ tests/Makefile
+ tests/CppTestHarness/Makefile
  ode-config
  ])
 
@@ -563,8 +568,8 @@ echo "  Use gyroscopic term:     $gyroscopic"
 echo "  Is this a Pentium:       $pentium"
 echo "  Is the CPU x86-64:       $cpu64"
 echo "  Is this a release build: $release"
-echo "  Is this a debug build:   $debug"
-echo "  Using SONAME:		  $use_soname"
+echo "  Adding debug symbols:    $debug"
+echo "  Using SONAME:		 $use_soname"
 echo "  Headers will be installed in $prefix/include/ode"
 echo "  Libraries will be installed in $prefix/lib"
 

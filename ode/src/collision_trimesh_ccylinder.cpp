@@ -282,7 +282,7 @@ inline int	_ProcessLocalContacts()
 	}
 
 #ifdef OPTIMIZE_CONTACTS
-	if (ctContacts > 1)
+	if (ctContacts > 1 && !(iFlags & CONTACTS_UNIMPORTANT))
 	{
 		// Can be optimized...
 		_OptimizeLocalContacts();
@@ -375,7 +375,7 @@ static BOOL _cldTestAxis(const dVector3 &v0,
 	dReal fL = LENGTHOF(vAxis);
 	// if not long enough
 	// TODO : dReal epsilon please
-	if ( fL < 1e-5f ) 
+	if ( fL < REAL(1e-5) ) 
 	{
 		// do nothing
 		//iLastOutAxis = 0;
@@ -803,7 +803,7 @@ static void _cldTestOneTriangleVSCapsule( const dVector3 &v0,
 	if ( iBestAxis == 0 ) 
 	{
 		// this should not happen (we should already exit in that case)
-		ASSERT(FALSE);
+		dIASSERT(FALSE);
 		// do nothing
 		return;
 	}
@@ -850,21 +850,21 @@ static void _cldTestOneTriangleVSCapsule( const dVector3 &v0,
 	// plane with edge 0
 	dVector3 vTemp;
 	dCROSS(vTemp,=,vN,vE0);
-	CONSTRUCTPLANE(plPlane, vTemp, 1e-5f);
+	CONSTRUCTPLANE(plPlane, vTemp, REAL(1e-5));
 	if(!_cldClipEdgeToPlane( vCEdgePoint0, vCEdgePoint1, plPlane ))
 	{ 
 		return; 
 	}
 
 	dCROSS(vTemp,=,vN,vE1);
-	CONSTRUCTPLANE(plPlane, vTemp, -(dDOT(vE0,vTemp)-1e-5f));
+	CONSTRUCTPLANE(plPlane, vTemp, -(dDOT(vE0,vTemp)-REAL(1e-5)));
 	if(!_cldClipEdgeToPlane( vCEdgePoint0, vCEdgePoint1, plPlane )) 
 	{ 
 		return; 
 	}
 
 	dCROSS(vTemp,=,vN,vE2);
-	CONSTRUCTPLANE(plPlane, vTemp, 1e-5f);
+	CONSTRUCTPLANE(plPlane, vTemp, REAL(1e-5));
 	if(!_cldClipEdgeToPlane( vCEdgePoint0, vCEdgePoint1, plPlane )) { 
 		return; 
 	}
@@ -897,7 +897,7 @@ static void _cldTestOneTriangleVSCapsule( const dVector3 &v0,
 
 	// Cached contacts's data
 	// contact 0
-    if (ctContacts < (iFlags & NUMC_MASK)) {
+    dIASSERT(ctContacts < (iFlags & NUMC_MASK)); // Do not call function if there is no room to store result
 	gLocalContacts[ctContacts].fDepth = fDepth0;
 	SET(gLocalContacts[ctContacts].vNormal,vNormal);
 	SET(gLocalContacts[ctContacts].vPos,vCEdgePoint0);
@@ -912,7 +912,6 @@ static void _cldTestOneTriangleVSCapsule( const dVector3 &v0,
 	gLocalContacts[ctContacts].nFlags = 1;
 	ctContacts++;
         }
-    }
 
 }
 
@@ -920,6 +919,11 @@ static void _cldTestOneTriangleVSCapsule( const dVector3 &v0,
 // Ported by Nguyem Binh
 int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int skip)
 {
+	dIASSERT (skip >= (int)sizeof(dContactGeom));
+	dIASSERT (o1->type == dTriMeshClass);
+	dIASSERT (o2->type == dCapsuleClass);
+	dIASSERT ((flags & NUMC_MASK) >= 1);
+	
 	dxTriMesh* TriMesh = (dxTriMesh*)o1;
 	gCylinder = o2;
 	gTriMesh = o1;
@@ -968,22 +972,28 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 	// Will it better to use LSS here? -> confirm Pierre.
 	 OBBCollider& Collider = TriMesh->_OBBCollider;
 
-	 Point cCenter((float) vCapsulePosition[0],(float) vCapsulePosition[1],(float) vCapsulePosition[2]);
-	 Point cExtents((float) vCapsuleRadius,(float) vCapsuleRadius,(float) fCapsuleSize/2);
-
+	 // It is a potential issue to explicitly cast to float 
+	 // if custom width floating point type is introduced in OPCODE.
+	 // It is necessary to make a typedef and cast to it
+	 // (e.g. typedef float opc_float;)
+	 // However I'm not sure in what header it should be added.
+	 
+	 Point cCenter(/*(float)*/ vCapsulePosition[0], /*(float)*/ vCapsulePosition[1], /*(float)*/ vCapsulePosition[2]);
+	 Point cExtents(/*(float)*/ vCapsuleRadius, /*(float)*/ vCapsuleRadius,/*(float)*/ fCapsuleSize/2);
+	 
 	 Matrix3x3 obbRot;
 
-	 obbRot[0][0] = (float) mCapsuleRotation[0];
-	 obbRot[1][0] = (float) mCapsuleRotation[1];
-	 obbRot[2][0] = (float) mCapsuleRotation[2];
+	 obbRot[0][0] = /*(float)*/ mCapsuleRotation[0];
+	 obbRot[1][0] = /*(float)*/ mCapsuleRotation[1];
+	 obbRot[2][0] = /*(float)*/ mCapsuleRotation[2];
 
-	 obbRot[0][1] = (float) mCapsuleRotation[4];
-	 obbRot[1][1] = (float) mCapsuleRotation[5];
-	 obbRot[2][1] = (float) mCapsuleRotation[6];
+	 obbRot[0][1] = /*(float)*/ mCapsuleRotation[4];
+	 obbRot[1][1] = /*(float)*/ mCapsuleRotation[5];
+	 obbRot[2][1] = /*(float)*/ mCapsuleRotation[6];
 
-	 obbRot[0][2] = (float) mCapsuleRotation[8];
-	 obbRot[1][2] = (float) mCapsuleRotation[9];
-	 obbRot[2][2] = (float) mCapsuleRotation[10];
+	 obbRot[0][2] = /*(float)*/ mCapsuleRotation[8];
+	 obbRot[1][2] = /*(float)*/ mCapsuleRotation[9];
+	 obbRot[2][2] = /*(float)*/ mCapsuleRotation[10];
 
 	 OBB obbCapsule(cCenter,cExtents,obbRot);
 
@@ -1045,12 +1055,7 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 		// loop through all intersecting triangles
 		for (int i = 0; i < TriCount; i++)
 		{
-			if(ctContacts>=(iFlags & NUMC_MASK)) 
-			{
-				break;
-			}
-
-			const int& Triint = Triangles[i];
+			const int Triint = Triangles[i];
 			if (!Callback(TriMesh, gCylinder, Triint)) continue;
 
 
@@ -1065,6 +1070,13 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 			// fill-in tri index for generated contacts
 			for (; ctContacts0<ctContacts; ctContacts0++)
 				gLocalContacts[ctContacts0].triIndex = Triint;
+
+			// Putting "break" at the end of loop prevents unnecessary checks on first pass and "continue"
+			if(ctContacts>=(iFlags & NUMC_MASK)) 
+			{
+				break;
+			}
+			
 		}
 	 }
 
@@ -1078,6 +1090,11 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 // capsule - trimesh  By francisco leon
 int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int skip)
 {
+	dIASSERT (skip >= (int)sizeof(dContactGeom));
+	dIASSERT (o1->type == dTriMeshClass);
+	dIASSERT (o2->type == dCapsuleClass);
+	dIASSERT ((flags & NUMC_MASK) >= 1);
+	
 	dxTriMesh* TriMesh = (dxTriMesh*)o1;
 	dxGeom*	   gCylinder = o2;
 
@@ -1124,37 +1141,40 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 
     GIM_CONTACT * ptrimeshcontacts = GIM_DYNARRAY_POINTER(GIM_CONTACT,trimeshcontacts);
 
+	unsigned contactcount = trimeshcontacts.m_size;
+	unsigned contactmax = (unsigned)(flags & NUMC_MASK);
+	if (contactcount > contactmax)
+	{
+		contactcount = contactmax;
+	}
+
     dContactGeom* pcontact;
-	int contactcount = 0;
 	unsigned i;
 
-	for (i=0;i<trimeshcontacts.m_size;i++)
+	for (i=0;i<contactcount;i++)
 	{
-	    if(contactcount < (flags & 0xffff))
-        {
-            pcontact = SAFECONTACT(flags, contact, contactcount, skip);
-            contactcount++;
-            pcontact->pos[0] = ptrimeshcontacts->m_point[0];
-            pcontact->pos[1] = ptrimeshcontacts->m_point[1];
-            pcontact->pos[2] = ptrimeshcontacts->m_point[2];
-            pcontact->pos[3] = 1.0f;
+        pcontact = SAFECONTACT(flags, contact, i, skip);
 
-            pcontact->normal[0] = ptrimeshcontacts->m_normal[0];
-            pcontact->normal[1] = ptrimeshcontacts->m_normal[1];
-            pcontact->normal[2] = ptrimeshcontacts->m_normal[2];
-            pcontact->normal[3] = 0;
+        pcontact->pos[0] = ptrimeshcontacts->m_point[0];
+        pcontact->pos[1] = ptrimeshcontacts->m_point[1];
+        pcontact->pos[2] = ptrimeshcontacts->m_point[2];
+        pcontact->pos[3] = 1.0f;
 
-            pcontact->depth = ptrimeshcontacts->m_depth;
-            pcontact->g1 = TriMesh;
-            pcontact->g2 = gCylinder;
+        pcontact->normal[0] = ptrimeshcontacts->m_normal[0];
+        pcontact->normal[1] = ptrimeshcontacts->m_normal[1];
+        pcontact->normal[2] = ptrimeshcontacts->m_normal[2];
+        pcontact->normal[3] = 0;
 
-        }
+        pcontact->depth = ptrimeshcontacts->m_depth;
+        pcontact->g1 = TriMesh;
+        pcontact->g2 = gCylinder;
+
         ptrimeshcontacts++;
 	}
 
 	GIM_DYNARRAY_DESTROY(trimeshcontacts);
 
-    return contactcount;
+    return (int)contactcount;
 }
 #endif
 

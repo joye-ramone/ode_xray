@@ -46,21 +46,24 @@
 #include <ode/odemath.h>
 #include <ode/objects.h>
 #include "collision_kernel.h"	// for dxGeom
+#include "collision_util.h"
 
 int dCollideCylinderSphere(dxGeom* Cylinder, dxGeom* Sphere, 
                            int flags, dContactGeom *contact, int skip)
 {
 	dIASSERT (skip >= (int)sizeof(dContactGeom));
-	dIASSERT ((flags & 0xffff) >= 1);
+	dIASSERT (Cylinder->type == dCylinderClass);
+	dIASSERT (Sphere->type == dSphereClass);
+	dIASSERT ((flags & NUMC_MASK) >= 1);
 
 	unsigned char* pContactData = (unsigned char*)contact;
 	int GeomCount = 0; // count of used contacts
 
 #ifdef dSINGLE
-	const dReal toleranz = 0.0001f;
+	const dReal toleranz = REAL(0.0001);
 #endif
 #ifdef dDOUBLE
-	const dReal toleranz = 0.0000001;
+	const dReal toleranz = REAL(0.0000001);
 #endif
 
 	// get the data from the geoms
@@ -82,7 +85,7 @@ int dCollideCylinderSphere(dxGeom* Cylinder, dxGeom* Sphere,
 	vDir1[2] = Cylinder->final_posr->R[10];
 
 	dReal s;
-	s = length * dReal(0.5); // just a precomputed factor
+	s = length * REAL(0.5); // just a precomputed factor
 	G1Pos2[0] = vDir1[0] * s + cylpos[0];
 	G1Pos2[1] = vDir1[1] * s + cylpos[1];
 	G1Pos2[2] = vDir1[2] * s + cylpos[2];
@@ -108,7 +111,7 @@ int dCollideCylinderSphere(dxGeom* Cylinder, dxGeom* Sphere,
 	C[1] = s * vDir1[1] + G1Pos1[1] - SpherePos[1];
 	C[2] = s * vDir1[2] + G1Pos1[2] - SpherePos[2];
 	// t is the distance from the Sphere-middle to the cylinder-axis!
-	t = dReal(sqrt(C[0] * C[0] + C[1] * C[1] + C[2] * C[2]) );
+	t = dVector3Length(C);
 	if(t > (radius + radius2) )
 	{
 		// Sphere is too far away from the cylinder axis!
@@ -122,7 +125,7 @@ int dCollideCylinderSphere(dxGeom* Cylinder, dxGeom* Sphere,
 		// 3. collision
 		if(s <= 0)
 		{
-			contact->depth = radius2 - dReal(sqrt( (s) * (s) + (t - radius) * (t - radius) ));
+			contact->depth = radius2 - dSqrt( (s) * (s) + (t - radius) * (t - radius) );
 			if(contact->depth < 0)
 			{
 				// no collision!
@@ -142,7 +145,7 @@ int dCollideCylinderSphere(dxGeom* Cylinder, dxGeom* Sphere,
 		else
 		{
 			// now s is bigger than length here!
-			contact->depth = radius2 - dReal(sqrt( (s - length) * (s - length) + (t - radius) * (t - radius) ));
+			contact->depth = radius2 - dSqrt( (s - length) * (s - length) + (t - radius) * (t - radius) );
 			if(contact->depth < 0)
 			{
 				// no collision!
@@ -216,7 +219,7 @@ int dCollideCylinderSphere(dxGeom* Cylinder, dxGeom* Sphere,
 	else
 	{
 		// 2. collision
-		if(s <= (length * dReal(0.5)) )
+		if(s <= (length * REAL(0.5)) )
 		{
 			// collsision with the first disc
 			contact->depth = s + radius2;

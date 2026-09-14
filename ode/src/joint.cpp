@@ -629,6 +629,8 @@ static void ballInit (dxJointBall *j)
 {
   dSetZero (j->anchor1,4);
   dSetZero (j->anchor2,4);
+  j->erp = j->world->global_erp;
+  j->cfm = j->world->global_cfm;
 }
 
 
@@ -641,6 +643,10 @@ static void ballGetInfo1 (dxJointBall *j, dxJoint::Info1 *info)
 
 static void ballGetInfo2 (dxJointBall *joint, dxJoint::Info2 *info)
 {
+  info->erp = joint->erp;
+  info->cfm[0] = joint->cfm;
+  info->cfm[1] = joint->cfm;
+  info->cfm[2] = joint->cfm;
   setBall (joint,info,joint->anchor1,joint->anchor2);
 }
 
@@ -689,6 +695,50 @@ void dJointGetBallAnchor2 (dJointID j, dVector3 result)
     getAnchor (joint,result,joint->anchor1);
   else
     getAnchor2 (joint,result,joint->anchor2);
+}
+
+
+void dxJointBall::set (int num, dReal value)
+{
+  switch (num) {
+  case dParamCFM:
+    cfm = value;
+    break;
+  case dParamERP:
+    erp = value;
+    break;
+  }
+}
+ 
+
+dReal dxJointBall::get (int num)
+{
+  switch (num) {
+  case dParamCFM:
+    return cfm;
+  case dParamERP:
+    return erp;
+  default:
+	return 0;
+  }
+}
+
+
+void dJointSetBallParam (dJointID j, int parameter, dReal value)
+{
+  dxJointBall* joint = (dxJointBall*)j;
+  dUASSERT(joint,"bad joint argument");
+  dUASSERT(joint->vtable == &__dball_vtable,"joint is not a ball joint");
+  joint->set (parameter,value);
+}
+
+
+dReal dJointGetBallParam (dJointID j, int parameter)
+{
+  dxJointBall* joint = (dxJointBall*)j;
+  dUASSERT(joint,"bad joint argument");
+  dUASSERT(joint->vtable == &__dball_vtable,"joint is not a ball joint");
+  return joint->get (parameter);
 }
 
 
@@ -1374,8 +1424,12 @@ static void contactGetInfo2 (dxJointContact *j, dxJoint::Info2 *info)
   dReal k = info->fps * erp;
   dReal depth = j->contact.geom.depth - j->world->contactp.min_depth;
   if (depth < 0) depth = 0;
-  dReal maxvel = j->world->contactp.max_vel;
-  if (k*depth > maxvel) info->c[0] = maxvel; else info->c[0] = k*depth;
+
+  const dReal maxvel = j->world->contactp.max_vel;
+  info->c[0] = k*depth;
+  if (info->c[0] > maxvel)
+    info->c[0] = maxvel;
+
   if (j->contact.surface.mode & dContactSoftCFM)
     info->cfm[0] = j->contact.surface.soft_cfm;
 
@@ -2438,8 +2492,6 @@ static void PRInit (dxJointPR *j)
   dSetZero (j->qrel,4);
   dSetZero (j->offset,4);
 
-  dSetZero (j->prev,4);
-
   j->limotR.init (j->world);
   j->limotP.init (j->world);
 }
@@ -2599,7 +2651,6 @@ static void PRGetInfo1 (dxJointPR *j, dxJoint::Info1 *info)
 
 static void PRGetInfo2 (dxJointPR *joint, dxJoint::Info2 *info)
 {
-  int i;
   int s = info->rowskip;
   int s2= 2*s;
   int s3= 3*s;
@@ -2679,7 +2730,7 @@ static void PRGetInfo2 (dxJointPR *joint, dxJoint::Info2 *info)
 
 
   // Compute the right hand side of the constraint equation set. Relative
-  // body velocities along p and q to bring the hinge back into alignment.
+  // body velocities along p and q to bring the rotoide back into alignment.
   // ax1,ax2 are the unit length rotoide axes of body1 and body2 in world frame.
   // We need to rotate both bodies along the axis u = (ax1 x ax2).
   // if `theta' is the angle between ax1 and ax2, we need an angular velocity
@@ -2752,8 +2803,9 @@ static void PRGetInfo2 (dxJointPR *joint, dxJoint::Info2 *info)
 	info->J1l[s3+1] = q[1];
 	info->J1l[s3+2] = q[2];
 
-  dVector3 anchor2;
   if (joint->node[1].body) {
+    dVector3 anchor2;
+
     // Calculate anchor2 in world coordinate
     dMULTIPLY0_331 (anchor2, R2, joint->anchor2);
 
@@ -2771,18 +2823,11 @@ static void PRGetInfo2 (dxJointPR *joint, dxJoint::Info2 *info)
 		info->J2l[s3+1] = -q[1];
 		info->J2l[s3+2] = -q[2];
   }
-  else
-  {
-    anchor2[0] = joint->anchor2[0];
-    anchor2[1] = joint->anchor2[1];
-    anchor2[2] = joint->anchor2[2];
-  }
 
 
-
-	// We want to make correction for motion not in the line of the axisP
-	// We calculate the displacement w.r.t. the anchor pt.
-	//
+  // We want to make correction for motion not in the line of the axisP
+  // We calculate the displacement w.r.t. the anchor pt.
+  //
   // compute the elements 2 and 3 of right hand side.
   // we want to align the offset point (in body 2's frame) with the center of body 1.
   // The position should be the same when we are not along the prismatic axis
@@ -2962,23 +3007,12 @@ void dJointSetPRAnchor (dJointID j, dReal x, dReal y, dReal z)
 
   dVector3 dummy;
   setAnchors (joint,x,y,z,dummy,joint->anchor2);
-  PRComputeInitialRelativeRotation (joint);
-
-  if (joint->node[1].body)
-    dMULTIPLY0_331 (joint->prev, joint->node[1].body->posr.R,joint->anchor2);
-  else
-  {
-    joint->prev[0] = joint->anchor2[0];
-    joint->prev[1] = joint->anchor2[1];
-    joint->prev[2] = joint->anchor2[2];
-  }
 }
 
 
 void dJointSetPRAxis1 (dJointID j, dReal x, dReal y, dReal z)
 {
   dxJointPR* joint = (dxJointPR*)j;
-  int i;
   dUASSERT(joint,"bad joint argument");
   dUASSERT(joint->vtable == &__dPR_vtable,"joint is not a  Prismatic and Rotoide");
 
@@ -2990,8 +3024,6 @@ void dJointSetPRAxis1 (dJointID j, dReal x, dReal y, dReal z)
   // also compute distance between anchor of body1 w.r.t center of body 2
   dVector3 c;
   if (joint->node[1].body) {
-    dQMultiply1 (joint->qrel,joint->node[0].body->q,joint->node[1].body->q);
-
     dVector3 anchor2;
     dMULTIPLY0_331 (anchor2,joint->node[1].body->posr.R, joint->anchor2);
 
@@ -3003,10 +3035,6 @@ void dJointSetPRAxis1 (dJointID j, dReal x, dReal y, dReal z)
              joint->node[0].body->posr.pos[2] );
   }
   else if (joint->node[0].body) {
-    // set joint->qrel to the transpose of the first body's q
-    joint->qrel[0] = joint->node[0].body->q[0];
-    for (i=1; i<4; i++) joint->qrel[i] = -joint->node[0].body->q[i];
-
     c[0] = joint->anchor2[0] - joint->node[0].body->posr.pos[0];
     c[1] = joint->anchor2[1] - joint->node[0].body->posr.pos[1];
     c[2] = joint->anchor2[2] - joint->node[0].body->posr.pos[2];
@@ -3718,6 +3746,8 @@ static void fixedInit (dxJointFixed *j)
 {
   dSetZero (j->offset,4);
   dSetZero (j->qrel,4);
+  j->erp = j->world->global_erp;
+  j->cfm = j->world->global_cfm;
 }
 
 
@@ -3740,6 +3770,11 @@ static void fixedGetInfo2 (dxJointFixed *joint, dxJoint::Info2 *info)
   info->J1l[0] = 1;
   info->J1l[s+1] = 1;
   info->J1l[2*s+2] = 1;
+
+  info->erp = joint->erp;
+  info->cfm[0] = joint->cfm;
+  info->cfm[1] = joint->cfm;
+  info->cfm[2] = joint->cfm;
 
   dVector3 ofs;
   dMULTIPLY0_331 (ofs,joint->node[0].body->posr.R,joint->offset);
@@ -3789,6 +3824,49 @@ void dJointSetFixed (dJointID j)
       for (i=0; i<4; i++) joint->offset[i] = joint->node[0].body->posr.pos[i];
     }
   }
+}
+
+void dxJointFixed::set (int num, dReal value)
+{
+  switch (num) {
+  case dParamCFM:
+    cfm = value;
+    break;
+  case dParamERP:
+    erp = value;
+    break;
+  }
+}
+ 
+
+dReal dxJointFixed::get (int num)
+{
+  switch (num) {
+  case dParamCFM:
+    return cfm;
+  case dParamERP:
+    return erp;
+  default:
+	return 0;
+  }
+}
+
+
+void dJointSetFixedParam (dJointID j, int parameter, dReal value)
+{
+  dxJointFixed* joint = (dxJointFixed*)j;
+  dUASSERT(joint,"bad joint argument");
+  dUASSERT(joint->vtable == &__dfixed_vtable,"joint is not a fixed joint");
+  joint->set (parameter,value);
+}
+
+
+dReal dJointGetFixedParam (dJointID j, int parameter)
+{
+  dxJointFixed* joint = (dxJointFixed*)j;
+  dUASSERT(joint,"bad joint argument");
+  dUASSERT(joint->vtable == &__dfixed_vtable,"joint is not a fixed joint");
+  return joint->get (parameter);
 }
 
 
@@ -3982,5 +4060,6 @@ void dJointSetPlane2DAngleParam (dxJoint *joint,
 	dxJointPlane2D* joint2d = (dxJointPlane2D*)( joint );
 	joint2d->motor_angle.set (parameter, value);
 }
+
 
 

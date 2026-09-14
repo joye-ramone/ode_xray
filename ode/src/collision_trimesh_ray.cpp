@@ -36,6 +36,11 @@
 
 #if dTRIMESH_OPCODE
 int dCollideRTL(dxGeom* g1, dxGeom* RayGeom, int Flags, dContactGeom* Contacts, int Stride){
+	dIASSERT (Stride >= (int)sizeof(dContactGeom));
+	dIASSERT (g1->type == dTriMeshClass);
+	dIASSERT (RayGeom->type == dRayClass);
+	dIASSERT ((Flags & NUMC_MASK) >= 1);
+
 	dxTriMesh* TriMesh = (dxTriMesh*)g1;
 
 	const dVector3& TLPosition = *(const dVector3*)dGeomGetPosition(TriMesh);
@@ -81,9 +86,6 @@ int dCollideRTL(dxGeom* g1, dxGeom* RayGeom, int Flags, dContactGeom* Contacts, 
 
 	int OutTriCount = 0;
 	for (int i = 0; i < TriCount; i++) {
-		if (OutTriCount == (Flags & 0xffff)) {
-			break;
-		}
 		if (TriMesh->RayCallback == null ||
                     TriMesh->RayCallback(TriMesh, RayGeom, Faces[i].mFaceID,
                                          Faces[i].mU, Faces[i].mV)) {
@@ -97,7 +99,11 @@ int dCollideRTL(dxGeom* g1, dxGeom* RayGeom, int Flags, dContactGeom* Contacts, 
 			dVector3 dv[3];
 			FetchTriangle(TriMesh, TriIndex, TLPosition, TLRotation, dv);
 
-			float T = Faces[i].mDistance;
+			// No sense to save on single type conversion in algorithm of this size.
+			// If there would be a custom typedef for distance type it could be used 
+			// instead of dReal. However using float directly is the loss of abstraction 
+			// and possible loss of precision in future.
+			/*float*/ dReal T = Faces[i].mDistance;
 			Contact->pos[0] = Origin[0] + (Direction[0] * T);
 			Contact->pos[1] = Origin[1] + (Direction[1] * T);
 			Contact->pos[2] = Origin[2] + (Direction[2] * T);
@@ -124,6 +130,11 @@ int dCollideRTL(dxGeom* g1, dxGeom* RayGeom, int Flags, dContactGeom* Contacts, 
 			Contact->g2 = RayGeom;
 				
 			OutTriCount++;
+
+			// Putting "break" at the end of loop prevents unnecessary checks on first pass and "continue"
+			if (OutTriCount >= (Flags & NUMC_MASK)) {
+				break;
+			}
 		}
 	}
 	return OutTriCount;
@@ -133,6 +144,11 @@ int dCollideRTL(dxGeom* g1, dxGeom* RayGeom, int Flags, dContactGeom* Contacts, 
 #if dTRIMESH_GIMPACT
 int dCollideRTL(dxGeom* g1, dxGeom* RayGeom, int Flags, dContactGeom* Contacts, int Stride)
 {
+	dIASSERT (Stride >= (int)sizeof(dContactGeom));
+	dIASSERT (g1->type == dTriMeshClass);
+	dIASSERT (RayGeom->type == dRayClass);
+	dIASSERT ((Flags & NUMC_MASK) >= 1);
+	
 	dxTriMesh* TriMesh = (dxTriMesh*)g1;
 
     dReal Length = dGeomRayGetLength(RayGeom);
@@ -161,27 +177,17 @@ int dCollideRTL(dxGeom* g1, dxGeom* RayGeom, int Flags, dContactGeom* Contacts, 
 
 	int OutTriCount = 0;
 
-	if(TriMesh->RayCallback)
+	if(!TriMesh->RayCallback || 
+		TriMesh->RayCallback(TriMesh, RayGeom, contact_data.m_face_id, contact_data.u , contact_data.v))
 	{
-        if(TriMesh->RayCallback(TriMesh, RayGeom, contact_data.m_face_id,
-                                         contact_data.u , contact_data.v))
-        {
-            OutTriCount = 1;
-        }
-	}
-	else
-	{
-	    OutTriCount = 1;
-	}
-
-	if(OutTriCount>0)
-	{
-	    dContactGeom* Contact = SAFECONTACT(Flags, Contacts, (OutTriCount-1), Stride);
+		dContactGeom* Contact = SAFECONTACT(Flags, Contacts, (OutTriCount-1), Stride);
         VEC_COPY(Contact->pos,contact_data.m_point);
         VEC_COPY(Contact->normal,contact_data.m_normal);
         Contact->depth = contact_data.tparam;
         Contact->g1 = TriMesh;
         Contact->g2 = RayGeom;
+		
+		OutTriCount = 1;
 	}
 
 	return OutTriCount;

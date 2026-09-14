@@ -36,20 +36,23 @@
 #include <ode/objects.h>
 
 #include "collision_kernel.h"	// for dxGeom
+#include "collision_util.h"
+
 
 int dCollideCylinderPlane(dxGeom *Cylinder, dxGeom *Plane, int flags, dContactGeom *contact, int skip)
 {
 	dIASSERT (skip >= (int)sizeof(dContactGeom));
-	dIASSERT ((flags & 0xffff) >= 1);
+	dIASSERT (Cylinder->type == dCylinderClass);
+	dIASSERT (Plane->type == dPlaneClass);
+	dIASSERT ((flags & NUMC_MASK) >= 1);
 
-	unsigned char* pContactData = (unsigned char*)contact;
 	int GeomCount = 0; // count of used contactgeoms
 
 #ifdef dSINGLE
-	const dReal toleranz = 0.0001f;
+	const dReal toleranz = REAL(0.0001);
 #endif
 #ifdef dDOUBLE
-	const dReal toleranz = 0.0000001;
+	const dReal toleranz = REAL(0.0000001);
 #endif
 
 	// Get the properties of the cylinder (length+radius)
@@ -68,7 +71,7 @@ int dCollideCylinderPlane(dxGeom *Cylinder, dxGeom *Plane, int flags, dContactGe
 	vDir1[2] = Cylinder->final_posr->R[10];
 
 	dReal s;
-	s = length * dReal(0.5);
+	s = length * REAL(0.5);
 	G1Pos2[0] = vDir1[0] * s + cylpos[0];
 	G1Pos2[1] = vDir1[1] * s + cylpos[1];
 	G1Pos2[2] = vDir1[2] * s + cylpos[2];
@@ -82,26 +85,24 @@ int dCollideCylinderPlane(dxGeom *Cylinder, dxGeom *Plane, int flags, dContactGe
 	// parallel-check
 	s = vDir1[0] * PlaneNormal[0] + vDir1[1] * PlaneNormal[1] + vDir1[2] * PlaneNormal[2];
 	if(s < 0)
-		s += dReal(1.0); // is ca. 0, if vDir1 and PlaneNormal are parallel
+		s += REAL(1.0); // is ca. 0, if vDir1 and PlaneNormal are parallel
 	else
-		s -= dReal(1.0); // is ca. 0, if vDir1 and PlaneNormal are parallel
+		s -= REAL(1.0); // is ca. 0, if vDir1 and PlaneNormal are parallel
 	if(s < toleranz && s > (-toleranz))
 	{
 		// discs are parallel to the plane
 
 		// 1.compute if, and where contacts are
 		dVector3 P;
-		s = planevec[3] - planevec[0] * G1Pos1[0] - planevec[1] * G1Pos1[1] - planevec[2] * G1Pos1[2];
+		s = planevec[3] - dVector3Dot(planevec, G1Pos1);
 		dReal t;
-		t = planevec[3] - planevec[0] * G1Pos2[0] - planevec[1] * G1Pos2[1] - planevec[2] * G1Pos2[2];
+		t = planevec[3] - dVector3Dot(planevec, G1Pos2);
 		if(s >= t) // s == t does never happen, 
 		{
 			if(s >= 0)
 			{
 				// 1. Disc
-				P[0] = G1Pos1[0];
-				P[1] = G1Pos1[1];
-				P[2] = G1Pos1[2];
+				dVector3Copy(G1Pos1, P);
 			}
 			else
 				return GeomCount; // no contacts
@@ -111,9 +112,7 @@ int dCollideCylinderPlane(dxGeom *Cylinder, dxGeom *Plane, int flags, dContactGe
 			if(t >= 0)
 			{
 				// 2. Disc
-				P[0] = G1Pos2[0];
-				P[1] = G1Pos2[1];
-				P[2] = G1Pos2[2];
+				dVector3Copy(G1Pos2, P);
 			}
 			else
 				return GeomCount; // no contacts
@@ -124,7 +123,7 @@ int dCollideCylinderPlane(dxGeom *Cylinder, dxGeom *Plane, int flags, dContactGe
 		if(vDir1[0] < toleranz && vDir1[0] > (-toleranz))
 		{
 			// not x-axis
-			V1[0] = vDir1[0] + dReal(1.0); // random value
+			V1[0] = vDir1[0] + REAL(1.0); // random value
 			V1[1] = vDir1[1];
 			V1[2] = vDir1[2];
 		}
@@ -132,24 +131,18 @@ int dCollideCylinderPlane(dxGeom *Cylinder, dxGeom *Plane, int flags, dContactGe
 		{
 			// maybe x-axis
 			V1[0] = vDir1[0];
-			V1[1] = vDir1[1] + dReal(1.0); // random value
+			V1[1] = vDir1[1] + REAL(1.0); // random value
 			V1[2] = vDir1[2];
 		}
 		// V1 is now another direction than vDir1
 		// Cross-product
-	    V2[0] = V1[1] * vDir1[2] - V1[2] * vDir1[1];
-		V2[1] = V1[2] * vDir1[0] - V1[0] * vDir1[2];
-		V2[2] = V1[0] * vDir1[1] - V1[1] * vDir1[0];
+	    dVector3Cross(V1, vDir1, V2);
 		// make unit V2
-		t = dReal(sqrt(V2[0] * V2[0] + V2[1] * V2[1] + V2[2] * V2[2]));
+		t = dVector3Length(V2);
 		t = radius / t;
-		V2[0] *= t;
-		V2[1] *= t;
-		V2[2] *= t;
+		dVector3Scale(V2, t);
 		// cross again
-	    V1[0] = V2[1] * vDir1[2] - V2[2] * vDir1[1];
-		V1[1] = V2[2] * vDir1[0] - V2[0] * vDir1[2];
-		V1[2] = V2[0] * vDir1[1] - V2[1] * vDir1[0];
+		dVector3Cross(V2, vDir1, V1);
 		// |V2| is 'radius' and vDir1 unit, so |V1| is 'radius'
 		// V1 = first axis
 		// V2 = second axis
@@ -157,136 +150,104 @@ int dCollideCylinderPlane(dxGeom *Cylinder, dxGeom *Plane, int flags, dContactGe
 		// 3. generate contactpoints
 
 		// Potential contact 1
-		contact->pos[0] = P[0] + V1[0];
-		contact->pos[1] = P[1] + V1[1];
-		contact->pos[2] = P[2] + V1[2];
-		contact->depth = planevec[3] - planevec[0] * contact->pos[0] - planevec[1] * contact->pos[1] - planevec[2] * contact->pos[2];
+		dVector3Add(P, V1, contact->pos);
+		contact->depth = planevec[3] - dVector3Dot(planevec, contact->pos);
 		if(contact->depth > 0)
 		{
-			contact->normal[0] = PlaneNormal[0];
-			contact->normal[1] = PlaneNormal[1];
-			contact->normal[2] = PlaneNormal[2];
+			dVector3Copy(PlaneNormal, contact->normal);
 			contact->g1 = Cylinder;
 			contact->g2 = Plane;
 			GeomCount++;
-			if( GeomCount >= (flags & 0x0ffff))
+			if( GeomCount >= (flags & NUMC_MASK))
 				return GeomCount; // enough contactgeoms
-			pContactData += skip;
-			contact = (dContactGeom*)pContactData;
+			contact = (dContactGeom *)((char *)contact + skip);
 		}
 
 		// Potential contact 2
-		contact->pos[0] = P[0] - V1[0];
-		contact->pos[1] = P[1] - V1[1];
-		contact->pos[2] = P[2] - V1[2];
-		contact->depth = planevec[3] - planevec[0] * contact->pos[0] - planevec[1] * contact->pos[1] - planevec[2] * contact->pos[2];
+		dVector3Subtract(P, V1, contact->pos);
+		contact->depth = planevec[3] - dVector3Dot(planevec, contact->pos);
 		if(contact->depth > 0)
 		{
-			contact->normal[0] = PlaneNormal[0];
-			contact->normal[1] = PlaneNormal[1];
-			contact->normal[2] = PlaneNormal[2];
+			dVector3Copy(PlaneNormal, contact->normal);
 			contact->g1 = Cylinder;
 			contact->g2 = Plane;
 			GeomCount++;
-			if( GeomCount >= (flags & 0x0ffff))
+			if( GeomCount >= (flags & NUMC_MASK))
 				return GeomCount; // enough contactgeoms
-			pContactData += skip;
-			contact = (dContactGeom*)pContactData;
+			contact = (dContactGeom *)((char *)contact + skip);
 		}
 
 		// Potential contact 3
-		contact->pos[0] = P[0] + V2[0];
-		contact->pos[1] = P[1] + V2[1];
-		contact->pos[2] = P[2] + V2[2];
-		contact->depth = planevec[3] - planevec[0] * contact->pos[0] - planevec[1] * contact->pos[1] - planevec[2] * contact->pos[2];
+		dVector3Add(P, V2, contact->pos);
+		contact->depth = planevec[3] - dVector3Dot(planevec, contact->pos);
 		if(contact->depth > 0)
 		{
-			contact->normal[0] = PlaneNormal[0];
-			contact->normal[1] = PlaneNormal[1];
-			contact->normal[2] = PlaneNormal[2];
+			dVector3Copy(PlaneNormal, contact->normal);
 			contact->g1 = Cylinder;
 			contact->g2 = Plane;
 			GeomCount++;
-			if( GeomCount >= (flags & 0x0ffff))
+			if( GeomCount >= (flags & NUMC_MASK))
 				return GeomCount; // enough contactgeoms
-			pContactData += skip;
-			contact = (dContactGeom*)pContactData;
+			contact = (dContactGeom *)((char *)contact + skip);
 		}
 
 		// Potential contact 4
-		contact->pos[0] = P[0] - V2[0];
-		contact->pos[1] = P[1] - V2[1];
-		contact->pos[2] = P[2] - V2[2];
-		contact->depth = planevec[3] - planevec[0] * contact->pos[0] - planevec[1] * contact->pos[1] - planevec[2] * contact->pos[2];
+		dVector3Subtract(P, V2, contact->pos);
+		contact->depth = planevec[3] - dVector3Dot(planevec, contact->pos);
 		if(contact->depth > 0)
 		{
-			contact->normal[0] = PlaneNormal[0];
-			contact->normal[1] = PlaneNormal[1];
-			contact->normal[2] = PlaneNormal[2];
+			dVector3Copy(PlaneNormal, contact->normal);
 			contact->g1 = Cylinder;
 			contact->g2 = Plane;
 			GeomCount++;
-			if( GeomCount >= (flags & 0x0ffff))
+			if( GeomCount >= (flags & NUMC_MASK))
 				return GeomCount; // enough contactgeoms
-			pContactData += skip;
-			contact = (dContactGeom*)pContactData;
+			contact = (dContactGeom *)((char *)contact + skip);
 		}
 	}
 	else
 	{
-		dReal t = -((-PlaneNormal[0]) * vDir1[0] + (-PlaneNormal[1]) * vDir1[1] + (-PlaneNormal[2]) * vDir1[2]);
+		dReal t = dVector3Dot(PlaneNormal, vDir1);
 		C[0] = vDir1[0] * t - PlaneNormal[0];
 		C[1] = vDir1[1] * t - PlaneNormal[1];
 		C[2] = vDir1[2] * t - PlaneNormal[2];
-		s = dReal(sqrt(C[0] * C[0] + C[1] * C[1] + C[2] * C[2]));
+		s = dVector3Length(C);
 		// move C onto the circle
 		s = radius / s;
-		C[0] *= s;
-		C[1] *= s;
-		C[2] *= s;
+		dVector3Scale(C, s);
 
 		// deepest point of disc 1
-		contact->pos[0] = C[0] + G1Pos1[0];
-		contact->pos[1] = C[1] + G1Pos1[1];
-		contact->pos[2] = C[2] + G1Pos1[2];
+		dVector3Add(C, G1Pos1, contact->pos);
 
 		// depth of the deepest point
-		contact->depth = planevec[3] - planevec[0] * contact->pos[0] - planevec[1] * contact->pos[1] - planevec[2] * contact->pos[2];
+		contact->depth = planevec[3] - dVector3Dot(planevec, contact->pos);
 		if(contact->depth >= 0)
 		{
-			contact->normal[0] = PlaneNormal[0];
-			contact->normal[1] = PlaneNormal[1];
-			contact->normal[2] = PlaneNormal[2];
+			dVector3Copy(PlaneNormal, contact->normal);
 			contact->g1 = Cylinder;
 			contact->g2 = Plane;
 			GeomCount++;
-			if( GeomCount >= (flags & 0x0ffff))
+			if( GeomCount >= (flags & NUMC_MASK))
 				return GeomCount; // enough contactgeoms
-			pContactData += skip;
-			contact = (dContactGeom*)pContactData;
+			contact = (dContactGeom *)((char *)contact + skip);
 		}
 
 		// C is still computed
 
 		// deepest point of disc 2
-		contact->pos[0] = C[0] + G1Pos2[0];
-		contact->pos[1] = C[1] + G1Pos2[1];
-		contact->pos[2] = C[2] + G1Pos2[2];
+		dVector3Add(C, G1Pos2, contact->pos);
 
 		// depth of the deepest point
 		contact->depth = planevec[3] - planevec[0] * contact->pos[0] - planevec[1] * contact->pos[1] - planevec[2] * contact->pos[2];
 		if(contact->depth >= 0)
 		{
-			contact->normal[0] = PlaneNormal[0];
-			contact->normal[1] = PlaneNormal[1];
-			contact->normal[2] = PlaneNormal[2];
+			dVector3Copy(PlaneNormal, contact->normal);
 			contact->g1 = Cylinder;
 			contact->g2 = Plane;
 			GeomCount++;
-			if( GeomCount >= (flags & 0x0ffff))
+			if( GeomCount >= (flags & NUMC_MASK))
 				return GeomCount; // enough contactgeoms
-			pContactData += skip;
-			contact = (dContactGeom*)pContactData;
+			contact = (dContactGeom *)((char *)contact + skip);
 		}
 	}
 	return GeomCount;
