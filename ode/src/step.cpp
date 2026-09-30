@@ -929,10 +929,10 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
     dReal *body_invI = invI + i*12;
     for (j=0; j<3; j++)
 	{
-		float &lf=cforce[i*8+j];
+		dReal &lf=cforce[i*8+j];
 		if(!dValid(lf))
 			lf=0.f;
-		float &af=cforce[i*8+4+j];
+		dReal &af=cforce[i*8+4+j];
 		if(!dValid(af))af=0.f;
 		body[i]->lvel[j] += body_invMass * cforce[i*8+j];
 	}
@@ -945,7 +945,10 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
 # ifdef TIMING
   dTimerNow ("update position");
 # endif
-  for (i=0; i<nb; i++) dxStepBody (body[i],stepsize);
+  for (i=0; i<nb; i++) {
+    if ((body[i]->flags & dxBodyNoUpdatePos) == 0)
+      dxStepBody (body[i],stepsize);
+  }
 
 # ifdef COMPARE_METHODS
   dReal *tmp_vnew = (dReal*) ALLOCA (nb*6*sizeof(dReal));

@@ -503,56 +503,6 @@ int dGeomRayGetClosestHit (dxGeom *g)
 }
 
 //****************************************************************************
-// geom group public API
-
-enum {
-  dGeomGroupClass = dSimpleSpaceClass
-};
-
-
-dGeomID dCreateGeomGroup (dSpaceID space)
-{
-  dSpaceID s = dSimpleSpaceCreate (space);
-  dSpaceSetCleanup (s,0);
-  return s;
-}
-
-
-void dGeomGroupAdd (dxGeom *g, dxGeom *x)
-{
-  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
-  dSpaceAdd ((dxSpace*)g,x);
-}
-
-
-void dGeomGroupRemove (dxGeom *g, dxGeom *x)
-{
-  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
-  dSpaceRemove ((dxSpace*)g,x);
-}
-
-
-int dGeomGroupGetNumGeoms (dxGeom *g)
-{
-  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
-  return dSpaceGetNumGeoms ((dxSpace*)g);
-}
-
-
-dGeomID dGeomGroupGetGeom (dxGeom *g, int i)
-{
-  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
-  return dSpaceGetGeom ((dxSpace*)g,i);
-}
-
-
-int dGeomGroupQuery (dxGeom *g, dxGeom *x)
-{
-  dUASSERT (g && g->type == dGeomGroupClass,"argument not a geomgroup");
-  return dSpaceQuery ((dxSpace*)g,x);
-}
-
-//****************************************************************************
 // box-box collision utility
 
 
@@ -701,37 +651,6 @@ void cullPoints (int n, dReal p[], int m, int i0, int iret[])
 // collision functions. this function only fills in the position and depth
 // fields.
 
-inline bool pointInBox(const dReal* point,const dReal* p,const dReal* R,const dReal* side){
-	dVector3 dif={point[0]-p[0],point[1]-p[1],point[2]-p[2]};
-	dReal dx,dy,dz;
-	dx=dFabs(dDOT14(dif,R+0));
-	dy=dFabs(dDOT14(dif,R+1));
-	dz=dFabs(dDOT14(dif,R+2));
-	return
-		(!(dx>side[0]/2.f))&&
-		(!(dy>side[1]/2.f))&&
-		(!(dz>side[2]/2.f));
-
-}
-
-inline bool CrossBoxSide(const dReal* point,const dReal* dir,
-						 const dReal* p,const dReal* R,const dReal* side,
-						 const int side_num,const float sign,dReal* out_p)
-{
-	dVector3 plane_point={p[0],p[1],p[2]};
-	int i;
-
-	for (i=0;i<3;i++)plane_point[i]+=R[side_num+i*4]*side[side_num]*sign;
-	//dReal _cos=dDOT14(dir,R[side_num]);
-
-	dReal length=(dDOT14(point,R+side_num)-dDOT14(plane_point,R+side_num))/dDOT14(dir,R+side_num);
-	for (i=0;i<3;i++)out_p[i]=plane_point[i]-dir[i]*length*sign;
-	int nx1=(side_num+1)%3;
-	int nx2=(side_num+2)%3;
-	return !((dFabs(dDOT14(out_p,R+nx1)-dDOT14(plane_point,R+nx1))>side[nx1]/2.f))&&
-		!((dFabs(dDOT14(out_p,R+nx2)-dDOT14(plane_point,R+nx2))>side[nx2]/2.f));
-}
-
 inline bool CrossBoxSide44(const dReal* point,const dReal* R1,const int ax_num,
 						   const dReal* p,const dReal* R2,const dReal* side,
 						   const int side_num,const float sign,dReal* out_p)
@@ -741,13 +660,13 @@ inline bool CrossBoxSide44(const dReal* point,const dReal* R1,const int ax_num,
 
 	for (i=0;i<3;i++)plane_point[i]+=R2[side_num+i*4]*side[side_num]/2.f*sign;
 	dReal _cos=dDOT44(R1+ax_num,R2+side_num);
+	// the edge is parallel to the face: no intersection point
+	if (dFabs(_cos) < REAL(1e-5)) return false;
 
 	dReal length=(dDOT14(point,R2+side_num)-dDOT14(plane_point,R2+side_num))/_cos;
 	for (i=0;i<3;i++)out_p[i]=point[i]-R1[i*4+ax_num]*length;
 	int nx1=(side_num+1)%3;
 	int nx2=(side_num+2)%3;
-	//dReal pr1 =dFabs(dDOT14(out_p,R2+nx1)-dDOT14(plane_point,R2+nx1));
-	//dReal pr2 =dFabs(dDOT14(out_p,R2+nx2)-dDOT14(plane_point,R2+nx2));
 	return !((dFabs(dDOT14(out_p,R2+nx1)-dDOT14(plane_point,R2+nx1))>side[nx1]/2.f))&&
 		!((dFabs(dDOT14(out_p,R2+nx2)-dDOT14(plane_point,R2+nx2))>side[nx2]/2.f));
 }
@@ -923,31 +842,8 @@ int dBoxBox (const dVector3 p1, const dMatrix3 R1,
 			for (i=0; i<3; i++) pa[i] += sign * A[j] * R1[i*4+j];
 		}
 
-		dVector3  pa1,pa2,pa3;//psf,
-		/* 
-		sign = (dDOT14(normal,R1+iamx) > 0.f) ? REAL(1.0) : REAL(-1.0);
-		for (i=0; i<3; i++) psf[i] = p1[i]+sign * A[iamx] * R1[i*4+iamx];
-
-		sign = (dDOT14(normal,R1+iacr) > 0.f) ? REAL(1.0) : REAL(-1.0);
-		for (i=0; i<3; i++) pa1[i] =psf[i]+ sign * A[iacr] * R1[i*4+iacr];
-		for (i=0; i<3; i++) pa2[i] =psf[i]- sign * A[iacr] * R1[i*4+iacr];
-
-		sign = (dDOT14(normal,R1+ianx) > 0.f) ? REAL(1.0) : REAL(-1.0);
-		for (i=0; i<3; i++) pa3[i] =psf[i]+ sign * A[ianx] * R1[i*4+ianx];
-		*/
-
+		dVector3  pa1,pa2,pa3;
 		dVector3  pb1,pb2,pb3;
-		/*
-		sign = (dDOT14(normal,R2+ibmx) > 0.f) ? REAL(1.0) : REAL(-1.0);
-		for (i=0; i<3; i++) psf[i] = p2[i]+sign * B[ibmx] * R2[i*4+ibmx];
-
-		sign = (dDOT14(normal,R2+ibcr) > 0.f) ? REAL(1.0) : REAL(-1.0);
-		for (i=0; i<3; i++) pb1[i] =psf[i]+ sign * B[ibcr] * R2[i*4+ibcr];
-		for (i=0; i<3; i++) pb2[i] =psf[i]- sign * B[ibcr] * R2[i*4+ibcr];
-
-		sign = (dDOT14(normal,R2+ibnx) > 0.f) ? REAL(1.0) : REAL(-1.0);
-		for (i=0; i<3; i++) pb3[i] =psf[i]+ sign * B[ibnx] * R2[i*4+ibnx];
-		*/
 		// find a point pb on the intersecting edge of box 2
 		dVector3 pb;
 		for (i=0; i<3; i++) pb[i] = p2[i];
@@ -976,7 +872,7 @@ int dBoxBox (const dVector3 p1, const dMatrix3 R1,
 		for (i=0; i<3; i++) dif[i]=p2[i]-pa0[i];
 		sign = (dDOT14(dif,R2+ibnx) > 0.f) ? REAL(1.0) : REAL(-1.0);
 
-		if(CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibnx,sign,pb1))
+		if(ret<maxc && CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibnx,sign,pb1))
 		{
 			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pb1[i];
 			for (i=0; i<3; i++) dif[i]=pb1[i]-pa0[i];
@@ -986,7 +882,7 @@ int dBoxBox (const dVector3 p1, const dMatrix3 R1,
 		}
 
 
-		if(CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibcr,1,pb2))
+		if(ret<maxc && CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibcr,1,pb2))
 		{
 			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pb2[i];
 			for (i=0; i<3; i++) dif[i]=pb2[i]-pa0[i];
@@ -996,7 +892,7 @@ int dBoxBox (const dVector3 p1, const dMatrix3 R1,
 		}
 
 
-		if(CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibcr,-1,pb3))
+		if(ret<maxc && CrossBoxSide44(pa0,R1,iacr,p2,R2,side2,ibcr,-1,pb3))
 		{
 			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pb3[i];
 			for (i=0; i<3; i++) dif[i]=pb3[i]-pa0[i];
@@ -1009,7 +905,7 @@ int dBoxBox (const dVector3 p1, const dMatrix3 R1,
 
 		for (i=0; i<3; i++) dif[i]=p1[i]-pb0[i];
 		sign = (dDOT14(dif,R1+ianx) > 0.f) ? REAL(1.0) : REAL(-1.0);
-		if(CrossBoxSide44(pb0,R2,ibcr,p1,R1,side1,ianx,sign,pa1))
+		if(ret<maxc && CrossBoxSide44(pb0,R2,ibcr,p1,R1,side1,ianx,sign,pa1))
 		{
 			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pa1[i];
 			for (i=0; i<3; i++) dif[i]=pa1[i]-pb0[i];
@@ -1019,7 +915,7 @@ int dBoxBox (const dVector3 p1, const dMatrix3 R1,
 		}
 
 
-		if(CrossBoxSide44(pb0,R2,ibcr,p2,R1,side1,iacr,1,pa2))
+		if(ret<maxc && CrossBoxSide44(pb0,R2,ibcr,p1,R1,side1,iacr,1,pa2))
 		{
 			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pa2[i];
 			for (i=0; i<3; i++) dif[i]=pa2[i]-pb0[i];
@@ -1029,7 +925,7 @@ int dBoxBox (const dVector3 p1, const dMatrix3 R1,
 		}
 
 
-		if(CrossBoxSide44(pb0,R2,ibcr,p2,R1,side1,iacr,-1,pa3))
+		if(ret<maxc && CrossBoxSide44(pb0,R2,ibcr,p1,R1,side1,iacr,-1,pa3))
 		{
 			for (i=0; i<3; i++)CONTACT(contact,skip*ret)->pos[i]=pa3[i];
 			for (i=0; i<3; i++) dif[i]=pa3[i]-pb0[i];
@@ -1786,7 +1682,7 @@ static int ray_sphere_helper (dxRay *ray, dVector3 sphere_pos, dReal radius,
   contact->pos[0] = ray->pos[0] + alpha*ray->R[0*4+2];
   contact->pos[1] = ray->pos[1] + alpha*ray->R[1*4+2];
   contact->pos[2] = ray->pos[2] + alpha*ray->R[2*4+2];
-  dReal nsign = (C < 0 || mode) ? -1.0 : 1.0;
+  dReal nsign = (C < 0 || mode) ? REAL(-1.0) : REAL(1.0);
   contact->normal[0] = nsign*(contact->pos[0] - sphere_pos[0]);
   contact->normal[1] = nsign*(contact->pos[1] - sphere_pos[1]);
   contact->normal[2] = nsign*(contact->pos[2] - sphere_pos[2]);
@@ -1910,7 +1806,7 @@ int dCollideRayCCylinder (dxGeom *o1, dxGeom *o2,
 {
   dIASSERT (skip >= (int)sizeof(dContactGeom));
   dIASSERT (o1->type == dRayClass);
-//  dIASSERT (o2->type == dCCylinderClass);
+  dIASSERT (o2->type == dCCylinderClass);
   dxRay *ray = (dxRay*) o1;
   dxCCylinder *ccyl = (dxCCylinder*) o2;
 
@@ -1987,7 +1883,7 @@ int dCollideRayCCylinder (dxGeom *o1, dxGeom *o2,
       q[1] = contact->pos[1] - ccyl->pos[1];
       q[2] = contact->pos[2] - ccyl->pos[2];
       k = dDOT14(q,ccyl->R+2);
-      dReal nsign = inside_ccyl ? -1.0 : 1.0;
+      dReal nsign = inside_ccyl ? REAL(-1.0) : REAL(1.0);
       if (k >= -lz2 && k <= lz2) {
 	contact->normal[0] = nsign * (contact->pos[0] -
 				      (ccyl->pos[0] + k*ccyl->R[0*4+2]));
@@ -2026,7 +1922,7 @@ int dCollideRayPlane (dxGeom *o1, dxGeom *o2, int flags,
 
   dReal alpha = plane->p[3] - dDOT (plane->p,ray->pos);
   // note: if alpha > 0 the starting point is below the plane
-  dReal nsign = (alpha > 0) ? -1.0 : 1.0;
+  dReal nsign = (alpha > 0) ? REAL(-1.0) : REAL(1.0);
   dReal k = dDOT14(plane->p,ray->R+2);
   if (k==0) return 0;		// ray parallel to plane
   alpha /= k;

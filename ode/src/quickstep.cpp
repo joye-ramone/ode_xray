@@ -50,7 +50,10 @@ typedef dReal *dRealMutablePtr;
 // help for motor-driven joints. unfortunately it appears to hurt
 // with high-friction contacts using the SOR method. use with care
 
- #define WARM_STARTING 0
+// X-Ray: warm starting is on. note the code tests the macro with #ifdef,
+// so "#define WARM_STARTING 0" would still enable it: comment the line out to
+// disable it (as upstream 0.8 does).
+#define WARM_STARTING 1
 
 
 // for the SOR method:
@@ -68,6 +71,35 @@ typedef dReal *dRealMutablePtr;
 // or hardly at all, but it doesn't seem to hurt.
 
 #define RANDOMLY_REORDER_CONSTRAINTS 1
+
+//****************************************************************************
+// special matrix multipliers
+
+// multiply block of B matrix (q x 6) with 12 dReal per row with C vektor (q)
+static void Multiply1_12q1 (dReal *A, dReal *B, dReal *C, int q)
+{
+  int k;
+  dReal sum;
+  dIASSERT (q>0 && A && B && C);
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[k*12] * C[k];
+  A[0] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[1+k*12] * C[k];
+  A[1] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[2+k*12] * C[k];
+  A[2] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[3+k*12] * C[k];
+  A[3] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[4+k*12] * C[k];
+  A[4] = sum;
+  sum = 0;
+  for (k=0; k<q; k++) sum += B[5+k*12] * C[k];
+  A[5] = sum;
+}
 
 //***************************************************************************
 // testing stuff
@@ -298,7 +330,7 @@ struct IndexError {
 
 #ifdef REORDER_CONSTRAINTS
 
-static  __cdecl  int compare_index_error (const void *a, const void *b)
+static int compare_index_error (const void *a, const void *b)
 {
 	const IndexError *i1 = (IndexError*) a;
 	const IndexError *i2 = (IndexError*) b;
@@ -311,7 +343,8 @@ static  __cdecl  int compare_index_error (const void *a, const void *b)
 
 #endif
 
-static thread_local auto rng = std::mt19937(std::random_device()());
+// fixed seed: constraint shuffling stays reproducible from run to run
+static thread_local std::mt19937 rng(5489u);
 
 static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *body,
 					 dRealPtr invI, dRealMutablePtr lambda, dRealMutablePtr fc, dRealMutablePtr b,
@@ -331,9 +364,11 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 	dSetZero (lambda,m);
 #endif
 
+#ifdef REORDER_CONSTRAINTS
 	// the lambda computed at the previous iteration.
 	// this is used to measure error for when we are reordering the indexes.
 	dRealAllocaArray (last_lambda,m);
+#endif
 
 	// a copy of the 'hi' vector in case findex[] is being used
 	dRealAllocaArray (hicopy,m);
@@ -422,25 +457,17 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 			}
 		}
 		qsort (order,m,sizeof(IndexError),&compare_index_error);
-#endif
-#ifdef RANDOMLY_REORDER_CONSTRAINTS
-		if ((iteration & 3) == 0) {
-			std::shuffle(order, order + m, rng);
-			/*
-			for (i=1; i<m; ++i) {
-				IndexError tmp = order[i];
-				int swapi = dRandInt(i+1);
-				order[i] = order[swapi];
-				order[swapi] = tmp;
-			}
-			*/
-		}
-#endif
 
 		//@@@ potential optimization: swap lambda and last_lambda pointers rather
 		//    than copying the data. we must make sure lambda is properly
 		//    returned to the caller
 		memcpy (last_lambda,lambda,m*sizeof(dReal));
+#endif
+#ifdef RANDOMLY_REORDER_CONSTRAINTS
+		if ((iteration & 3) == 0) {
+			std::shuffle(order, order + m, rng);
+		}
+#endif
 
 		for (int i=0; i<m; i++) {
 			// @@@ potential optimization: we could pre-sort J and iMJ, thereby
@@ -638,6 +665,7 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 		Jinfo.rowskip = 12;
 		Jinfo.fps = stepsize1;
 		Jinfo.erp = world->global_erp;
+		int mfb = 0; // number of rows of Jacobian we will have to save for joint feedback
 		for (i=0; i<nj; i++) {
 			Jinfo.J1l = J + ofs[i]*12;
 			Jinfo.J1a = Jinfo.J1l + 3;
@@ -653,6 +681,22 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 			for (j=0; j<info[i].m; j++) {
 				if (findex[ofs[i] + j] >= 0) findex[ofs[i] + j] += ofs[i];
 			}
+			if (joint[i]->feedback)
+				mfb += info[i].m;
+		}
+
+		// we need a copy of Jacobian for joint feedbacks
+		// because it gets destroyed by SOR solver
+		// instead of saving all Jacobian, we can save just rows
+		// for joints, that requested feedback (which is normaly much less)
+		dRealAllocaArray (Jcopy,mfb*12);
+		if (mfb > 0) {
+			mfb = 0;
+			for (i=0; i<nj; i++)
+				if (joint[i]->feedback) {
+					memcpy(Jcopy+mfb*12, J+ofs[i]*12, info[i].m*12*sizeof(dReal));
+					mfb += info[i].m;
+				}
 		}
 
 		// create an array of body numbers for each joint row
@@ -721,8 +765,8 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 			for (j=0; j<3; j++)
 			{
 
-				float &lf=cforce[i*6+j];
-				float &af=cforce[i*6+3+j];
+				dReal &lf=cforce[i*6+j];
+				dReal &af=cforce[i*6+3+j];
 				if(!dValid(lf))
 				{
 					lf=0.f;
@@ -742,38 +786,42 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 				for(j=0;j<6;j++)joint[i]->lambda[j]=0.f;
 			}
 		}
-		// if joint feedback is requested, compute the constraint force.
-		// BUT: cforce is inv(M)*J'*lambda, whereas we want just J'*lambda,
-		// so we must compute M*cforce.
-		// @@@ if any joint has a feedback request we compute the entire
-		//     adjusted cforce, which is not the most efficient way to do it.
-		for (j=0; j<nj; j++) {
-			if (joint[j]->feedback) {
-				// compute adjusted cforce
-				for (i=0; i<nb; i++) {
-					dReal k = body[i]->mass.mass;
-					cforce [i*6+0] *= k;
-					cforce [i*6+1] *= k;
-					cforce [i*6+2] *= k;
-					dVector3 tmp;
-					dMULTIPLY0_331 (tmp, I + 12*i, cforce + i*6 + 3);
-					cforce [i*6+3] = tmp[0];
-					cforce [i*6+4] = tmp[1];
-					cforce [i*6+5] = tmp[2];
-				}
-				// compute feedback for this and all remaining joints
-				for (; j<nj; j++) {
-					dJointFeedback *fb = joint[j]->feedback;
-					if (fb) {
-						int b1 = joint[j]->node[0].body->tag;
-						memcpy (fb->f1,cforce+b1*6,3*sizeof(dReal));
-						memcpy (fb->t1,cforce+b1*6+3,3*sizeof(dReal));
-						if (joint[j]->node[1].body) {
-							int b2 = joint[j]->node[1].body->tag;
-							memcpy (fb->f2,cforce+b2*6,3*sizeof(dReal));
-							memcpy (fb->t2,cforce+b2*6+3,3*sizeof(dReal));
-						}
+		if (mfb > 0) {
+			// straightforward computation of joint constraint forces:
+			// multiply related lambdas with respective J' block for joints
+			// where feedback was requested (upstream 0.8 fix: the old code
+			// reported the total constraint force acting on the body instead
+			// of the force of each joint)
+			mfb = 0;
+			for (i=0; i<nj; i++) {
+				if (joint[i]->feedback) {
+					dJointFeedback *fb = joint[i]->feedback;
+					if (!bvalid) {
+						// X-Ray: the solution was rejected above, report no force
+						dSetZero (fb->f1,3); dSetZero (fb->t1,3);
+						dSetZero (fb->f2,3); dSetZero (fb->t2,3);
+						mfb += info[i].m;
+						continue;
 					}
+					dReal data[6];
+					Multiply1_12q1 (data, Jcopy+mfb*12, lambda+ofs[i], info[i].m);
+					fb->f1[0] = data[0];
+					fb->f1[1] = data[1];
+					fb->f1[2] = data[2];
+					fb->t1[0] = data[3];
+					fb->t1[1] = data[4];
+					fb->t1[2] = data[5];
+					if (joint[i]->node[1].body)
+					{
+						Multiply1_12q1 (data, Jcopy+mfb*12+6, lambda+ofs[i], info[i].m);
+						fb->f2[0] = data[0];
+						fb->f2[1] = data[1];
+						fb->f2[2] = data[2];
+						fb->t2[0] = data[3];
+						fb->t2[1] = data[4];
+						fb->t2[2] = data[5];
+					}
+					mfb += info[i].m;
 				}
 			}
 		}

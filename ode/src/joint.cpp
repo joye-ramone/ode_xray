@@ -39,25 +39,7 @@ transform is the identity.
 
 extern "C" void dBodyAddTorque (dBodyID, dReal fx, dReal fy, dReal fz);
 extern "C" void dBodyAddForce (dBodyID, dReal fx, dReal fy, dReal fz);
-const dReal min_stop_err				=					M_PI*0.03f;//0.1f;//
-const dReal min_ball_err				=					0.0f;//0.01f;
-const dReal hinge_min_err_exis_par		=					0.000f;//0.01f;
-const dReal stop_early_reaction			=					M_PI*0.00f;
-//#define USE_STOPS_MIN_ERR									1
 
-static inline void add_min_err(dReal	&param,const dReal min_err)
-{
-	if(param>REAL(0.))
-	{
-		param-=min_err;
-		if(param<REAL(0.))param=REAL(0.);
-	}
-	else
-	{
-		param+=min_err;
-		if(param>REAL(0.))param=REAL(0.);
-	}
-}
 //****************************************************************************
 // utility
 
@@ -90,12 +72,8 @@ static inline void setBall (dxJoint *joint, dxJoint::Info2 *info,
   dReal k = info->fps * info->erp;
   if (joint->node[1].body) {
     for (int j=0; j<3; j++) {
-		dReal err=a2[j] + joint->node[1].body->pos[j] -
-			a1[j] - joint->node[0].body->pos[j];
-#ifdef		USE_BALL_MIN_ERR
-	  add_min_err(err,min_ball_err);
-#endif
-      info->c[j] = k * (err);
+      info->c[j] = k * (a2[j] + joint->node[1].body->pos[j] -
+			a1[j] - joint->node[0].body->pos[j]);
     }
   }
   else {
@@ -419,10 +397,10 @@ void dxJointLimitMotor::set (int num, dReal value)
 {
   switch (num) {
   case dParamLoStop:
-    if (value <= histop) lostop = value;
+    lostop = value;
     break;
   case dParamHiStop:
-    if (value >= lostop) histop = value;
+    histop = value;
     break;
   case dParamVel:
     vel = value;
@@ -468,25 +446,14 @@ dReal dxJointLimitMotor::get (int num)
 
 int dxJointLimitMotor::testRotationalLimit (dReal angle)
 {
-  if (angle <= (lostop)) {//+stop_early_reaction
+  if (angle <= lostop) {
     limit = 1;
-#ifdef USE_STOPS_MIN_ERR
-    limit_err = angle - lostop+min_stop_err;
-	if(limit_err>REAL(0.))limit_err=REAL(0.);
-#else
-	limit_err = angle - lostop;
-#endif
-
+    limit_err = angle - lostop;
     return 1;
   }
-  else if (angle >= (histop)) {//-stop_early_reaction
+  else if (angle >= histop) {
     limit = 2;
-#ifdef USE_STOPS_MIN_ERR
-    limit_err = angle - histop-min_stop_err;
-	if(limit_err<REAL(0.))limit_err=REAL(0.);
-#else
-	limit_err = angle - histop;
-#endif
+    limit_err = angle - histop;
     return 1;
   }
   else {
@@ -567,7 +534,7 @@ int dxJointLimitMotor::addLimot (dxJoint *joint,
 	// a fudge factor.
 
 	dReal fm = fmax;
-	if (vel > 0) fm = -fm;
+	if ((vel > 0) || (vel==0 && limit==2)) fm = -fm;
 
 	// if we're powering away from the limit, apply the fudge factor
 	if ((limit==1 && vel > 0) || (limit==2 && vel < 0)) fm *= fudge_factor;
@@ -815,43 +782,9 @@ static void hingeGetInfo2 (dxJointHinge *joint, dxJoint::Info2 *info)
     ax2[2] = joint->axis2[2];
   }
   dCROSS (b,=,ax1,ax2);
-
-#ifdef USE_HINGE_MIN_ERR
-  dVector3 verr={b[0],b[1],b[2]};
-  dNormalize3(verr);
-  b[0]+=verr[0]*hinge_min_err_exis_par;
-  b[1]+=verr[1]*hinge_min_err_exis_par;
-  b[2]+=verr[2]*hinge_min_err_exis_par;
-#endif
-
   dReal k = info->fps * info->erp;
-  dReal er1=dDOT(b,p);
-  dReal er2=dDOT(b,q);
-
-  /*if(er1>0.f)
-  {
-		er1-=hinge_min_err_exis_par;
-		if(er1<0.f)er1=0.f;
-  }
-  else
-  {
-		er1+=hinge_min_err_exis_par;
-		if(er1>0.f)er1=0.f;
-  }
-
-  if(er2>0.f)
-  {
-	  er2-=hinge_min_err_exis_par;
-	  if(er2<0.f)er2=0.f;
-  }
-  else
-  {
-	  er2+=hinge_min_err_exis_par;
-	  if(er2>0.f)er2=0.f;
-  }*/
-
-  info->c[3] = k * er1;
-  info->c[4] = k * er2;
+  info->c[3] = k * dDOT(b,p);
+  info->c[4] = k * dDOT(b,q);
 
   // if the hinge is powered, or has joint limits, add in the stuff
   joint->limot.addLimot (joint,info,5,ax1,1);
@@ -1127,10 +1060,10 @@ static void sliderGetInfo2 (dxJointSlider *joint, dxJoint::Info2 *info)
   if (joint->node[1].body) {
     dVector3 tmp;
     dCROSS (tmp, = REAL(0.5) * ,c,p);
-    for (i=0; i<3; i++) info->J2a[s3+i] = tmp[i];
+    for (i=0; i<3; i++) info->J1a[s3+i] = tmp[i];
     for (i=0; i<3; i++) info->J2a[s3+i] = tmp[i];
     dCROSS (tmp, = REAL(0.5) * ,c,q);
-    for (i=0; i<3; i++) info->J2a[s4+i] = tmp[i];
+    for (i=0; i<3; i++) info->J1a[s4+i] = tmp[i];
     for (i=0; i<3; i++) info->J2a[s4+i] = tmp[i];
     for (i=0; i<3; i++) info->J2l[s3+i] = -p[i];
     for (i=0; i<3; i++) info->J2l[s4+i] = -q[i];
@@ -2299,7 +2232,7 @@ static void amotorComputeGlobalAxes (dxJointAMotor *joint, dVector3 ax[3])
 	// relative to b1
 	dMULTIPLY0_331 (ax[i],joint->node[0].body->R,joint->axis[i]);
       }
-      if (joint->rel[i] == 2) {
+      else if (joint->rel[i] == 2) {
 	// relative to b2
         dIASSERT(joint->node[1].body);
 	dMULTIPLY0_331 (ax[i],joint->node[1].body->R,joint->axis[i]);
@@ -2502,7 +2435,7 @@ extern "C" void dJointSetAMotorAxis (dxJointAMotor *joint, int anum, int rel,
 extern "C" void dJointSetAMotorAngle (dxJointAMotor *joint, int anum,
 				      dReal angle)
 {
-  dAASSERT(joint && anum >= 0 && anum < 2);
+  dAASSERT(joint && anum >= 0 && anum < 3);
   dUASSERT(joint->vtable == &__damotor_vtable,"joint is not an amotor");
   if (joint->mode == dAMotorUser) {
     if (anum < 0) anum = 0;
@@ -2580,7 +2513,7 @@ extern "C" int dJointGetAMotorAxisRel (dxJointAMotor *joint, int anum)
 
 extern "C" dReal dJointGetAMotorAngle (dxJointAMotor *joint, int anum)
 {
-  dAASSERT(joint && anum >= 0 && anum < 2);
+  dAASSERT(joint && anum >= 0 && anum < 3);
   dUASSERT(joint->vtable == &__damotor_vtable,"joint is not an amotor");
   if (anum < 0) anum = 0;
   if (anum > 2) anum = 2;
@@ -2736,28 +2669,17 @@ extern "C" void dJointSetFixed (dxJointFixed *joint)
 
 extern "C" void dJointSetFixedQuaternionPos (dxJointFixed *joint,dQuaternion quaternion,dReal* pos)
 {
+  // X-Ray: set the target orientation/position of a fixed joint that holds a
+  // single body (node[1].body == 0), e.g. an animated physics element
   dUASSERT(joint,"bad joint argument");
   dUASSERT(joint->vtable == &__dfixed_vtable,"joint is not fixed");
-  int i;
+  dUASSERT(!joint->node[1].body,"only a fixed joint attached to one body is supported");
+  if (!joint->node[0].body || joint->node[1].body) return;
 
-  // This code is taken from sJointSetSliderAxis(), we should really put the
-  // common code in its own function.
-  // compute the offset between the bodies
-  if (joint->node[0].body) {
-    if (joint->node[1].body) {
-     /* dQMultiply1 (joint->qrel,joint->node[0].body->q,joint->node[1].body->q);
-      dReal ofs[4];
-      for (i=0; i<4; i++) ofs[i] = joint->node[0].body->pos[i];
-      for (i=0; i<4; i++) ofs[i] -= joint->node[1].body->pos[i];
-      dMULTIPLY1_331 (joint->offset,joint->node[0].body->R,ofs);*/
-    }
-    else {
-      // set joint->qrel to the transpose of the first body's q
-      joint->qrel[0] = quaternion[0];//joint->node[0].body->q[0];
-      for (i=1; i<4; i++) joint->qrel[i] = -quaternion[i];//-joint->node[0].body->q[i];
-      for (i=0; i<3; i++) joint->offset[i] = pos[i];//joint->node[0].body->pos[i];
-    }
-  }
+  // qrel is the conjugate of the target orientation, offset the target position
+  joint->qrel[0] = quaternion[0];
+  for (int i=1; i<4; i++) joint->qrel[i] = -quaternion[i];
+  for (int i=0; i<3; i++) joint->offset[i] = pos[i];
 }
 
 dxJoint::Vtable __dfixed_vtable = {

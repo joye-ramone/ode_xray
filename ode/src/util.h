@@ -26,7 +26,7 @@
 #include "objects.h"
 #include "float.h"
 
-#ifndef MSVC
+#if !defined(_MSC_VER) && !defined(MSVC)
 #include <cmath> // for fpclassify
 #endif
 
@@ -41,9 +41,9 @@ typedef void (*dstepper_fn_t) (dxWorld *world, dxBody * const *body, int nb,
 
 void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper);
 
-inline bool		dValid	(const float x)
+inline bool		dValid	(const dReal x)
 {
-#ifdef MSVC
+#if defined(_MSC_VER) || defined(MSVC)
     // check for: Signaling NaN, Quiet NaN, Negative infinity (-INF), Positive infinity (+INF), Negative denormalized, Positive denormalized
 	int			cls			= _fpclass		(double(x));
 	if (cls&(_FPCLASS_SNAN+_FPCLASS_QNAN+_FPCLASS_NINF+_FPCLASS_PINF+_FPCLASS_ND+_FPCLASS_PD))	

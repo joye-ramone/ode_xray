@@ -807,7 +807,7 @@ void dBodySetNoUpdatePosMode(dBodyID b, int enabled)
 int dBodyGetNoUpdatePosMode(dBodyID b)
 {
 	dAASSERT(b);
-	return ((b->flags & dxBodyNoUpdatePos) == 0);
+	return ((b->flags & dxBodyNoUpdatePos) != 0);
 }
 
 // body auto-disable functions
