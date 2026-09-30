@@ -1070,12 +1070,13 @@ void dJointGroupEmpty (dJointGroupID group)
     jlist[i] = j;
     j = (dxJoint*) (group->stack.next (j->vtable->size));
   }
+  // X-Ray: joints are not unlinked from the world list here (the engine's
+  // CPHIsland truncates its joint list itself), but body references are
+  // always removed, also for joints that were attached without being added
+  // to a world - otherwise bodies would keep pointers into the freed group.
+  // this is a no-op for joints whose bodies were already detached.
   for (i=group->num-1; i >= 0; i--) {
-    if (jlist[i]->world) {
-      removeJointReferencesFromAttachedBodies (jlist[i]);
-      //removeObjectFromList (jlist[i]);
-      ///jlist[i]->world->nj--;
-    }
+    removeJointReferencesFromAttachedBodies (jlist[i]);
   }
   group->num = 0;
   group->stack.freeAll();

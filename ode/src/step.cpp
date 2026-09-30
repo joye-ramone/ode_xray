@@ -589,6 +589,14 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
   // also number all active joints in the joint list (set their tag values).
   // inactive joints receive a tag value of -1.
 
+  // X-Ray: the joint array is not built by traversing the bodies, so a body
+  // may reference a joint that is not in it. mark every joint attached to
+  // the island bodies inactive first, so the body-joint loop below never
+  // reads a stale tag left from another island or step.
+  for (i=0; i<nb; i++) {
+    for (dxJointNode *n=body[i]->firstjoint; n; n=n->next) n->joint->tag = -1;
+  }
+
   int m = 0;
   dxJoint::Info1 *info = (dxJoint::Info1*) ALLOCA (nj*sizeof(dxJoint::Info1));
   int *ofs = (int*) ALLOCA (nj*sizeof(int));
@@ -924,6 +932,7 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
   // multiply cforce by stepsize
   for (i=0; i < nb*8; i++) cforce[i] *= stepsize;
   // add invM * cforce to the body velocity
+  bool bvalid=true;
   for (i=0; i<nb; i++) {
     dReal body_invMass = body[i]->invMass;
     dReal *body_invI = invI + i*12;
@@ -931,13 +940,31 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
 	{
 		dReal &lf=cforce[i*8+j];
 		if(!dValid(lf))
+		{
 			lf=0.f;
+			bvalid=false;
+		}
 		dReal &af=cforce[i*8+4+j];
-		if(!dValid(af))af=0.f;
+		if(!dValid(af))
+		{
+			af=0.f;
+			bvalid=false;
+		}
 		body[i]->lvel[j] += body_invMass * cforce[i*8+j];
 	}
 	dMULTIPLYADD0_331 (body[i]->avel,body_invI,cforce+i*8+4);
 
+  }
+  if (!bvalid) {
+    // X-Ray: the solution was rejected above, report no force (as QuickStep
+    // does) instead of leaving NaN/INF in the joint feedback
+    for (i=0; i<nj; i++) {
+      dJointFeedback *fb = joint[i]->feedback;
+      if (fb) {
+	dSetZero (fb->f1,3); dSetZero (fb->t1,3);
+	dSetZero (fb->f2,3); dSetZero (fb->t2,3);
+      }
+    }
   }
 
   // update the position and orientation from the new linear/angular velocity
