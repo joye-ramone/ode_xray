@@ -71,7 +71,7 @@ static void Multiply2_p8r (dReal *A, dReal *B, dReal *C,
       sum += bb[4]*cc[4];
       sum += bb[5]*cc[5];
       sum += bb[6]*cc[6];
-      *(A++) = sum; 
+      *(A++) = sum;
       cc += 8;
     }
     A += Askip - r;
@@ -98,7 +98,7 @@ static void MultiplyAdd2_p8r (dReal *A, dReal *B, dReal *C,
       sum += bb[4]*cc[4];
       sum += bb[5]*cc[5];
       sum += bb[6]*cc[6];
-      *(A++) += sum; 
+      *(A++) += sum;
       cc += 8;
     }
     A += Askip - r;
@@ -497,7 +497,10 @@ void dInternalStepIsland_x1 (dxWorld *world, dxBody * const *body, int nb,
 # ifdef TIMING
   dTimerNow ("update position");
 # endif
-  for (i=0; i<nb; i++) dxStepBody (body[i],stepsize);
+  for (i = 0; i < nb; i++) {
+      if ((body[i]->flags & dxBodyNoUpdatePos) == 0)
+          dxStepBody(body[i], stepsize);
+  }
 
 # ifdef TIMING
   dTimerNow ("tidy up");
@@ -585,6 +588,14 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
   // entirely, so that the code that follows does not consider them.
   // also number all active joints in the joint list (set their tag values).
   // inactive joints receive a tag value of -1.
+
+  // X-Ray: the joint array is not built by traversing the bodies, so a body
+  // may reference a joint that is not in it. mark every joint attached to
+  // the island bodies inactive first, so the body-joint loop below never
+  // reads a stale tag left from another island or step.
+  for (i=0; i<nb; i++) {
+    for (dxJointNode *n=body[i]->firstjoint; n; n=n->next) n->joint->tag = -1;
+  }
 
   int m = 0;
   dxJoint::Info1 *info = (dxJoint::Info1*) ALLOCA (nj*sizeof(dxJoint::Info1));
@@ -744,15 +755,16 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
 	  // get joint numbers and ensure ofs[j1] >= ofs[j2]
 	  int j1 = n1->joint->tag;
 	  int j2 = n2->joint->tag;
+
+	  // if either joint was tagged as -1 then it is an inactive (m=0)
+	  // joint that should not be considered
+	  if (j1 == -1 || j2 == -1) continue;
+
 	  if (ofs[j1] < ofs[j2]) {
 	    int tmp = j1;
 	    j1 = j2;
 	    j2 = tmp;
 	  }
-
-	  // if either joint was tagged as -1 then it is an inactive (m=0)
-	  // joint that should not be considered
-	  if (j1==-1 || j2==-1) continue;
 
 	  // determine if body i is the 1st or 2nd body of joints j1 and j2
 	  int jb1 = (joint[j1]->node[1].body == body[i]);
@@ -920,11 +932,39 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
   // multiply cforce by stepsize
   for (i=0; i < nb*8; i++) cforce[i] *= stepsize;
   // add invM * cforce to the body velocity
+  bool bvalid=true;
   for (i=0; i<nb; i++) {
     dReal body_invMass = body[i]->invMass;
     dReal *body_invI = invI + i*12;
-    for (j=0; j<3; j++) body[i]->lvel[j] += body_invMass * cforce[i*8+j];
-    dMULTIPLYADD0_331 (body[i]->avel,body_invI,cforce+i*8+4);
+    for (j=0; j<3; j++)
+	{
+		dReal &lf=cforce[i*8+j];
+		if(!dValid(lf))
+		{
+			lf=0.f;
+			bvalid=false;
+		}
+		dReal &af=cforce[i*8+4+j];
+		if(!dValid(af))
+		{
+			af=0.f;
+			bvalid=false;
+		}
+		body[i]->lvel[j] += body_invMass * cforce[i*8+j];
+	}
+	dMULTIPLYADD0_331 (body[i]->avel,body_invI,cforce+i*8+4);
+
+  }
+  if (!bvalid) {
+    // X-Ray: the solution was rejected above, report no force (as QuickStep
+    // does) instead of leaving NaN/INF in the joint feedback
+    for (i=0; i<nj; i++) {
+      dJointFeedback *fb = joint[i]->feedback;
+      if (fb) {
+	dSetZero (fb->f1,3); dSetZero (fb->t1,3);
+	dSetZero (fb->f2,3); dSetZero (fb->t2,3);
+      }
+    }
   }
 
   // update the position and orientation from the new linear/angular velocity
@@ -932,7 +972,10 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
 # ifdef TIMING
   dTimerNow ("update position");
 # endif
-  for (i=0; i<nb; i++) dxStepBody (body[i],stepsize);
+  for (i=0; i<nb; i++) {
+    if ((body[i]->flags & dxBodyNoUpdatePos) == 0)
+      dxStepBody (body[i],stepsize);
+  }
 
 # ifdef COMPARE_METHODS
   dReal *tmp_vnew = (dReal*) ALLOCA (nb*6*sizeof(dReal));
@@ -968,7 +1011,7 @@ void dInternalStepIsland_x2 (dxWorld *world, dxBody * const *body, int nb,
 //****************************************************************************
 
 void dInternalStepIsland (dxWorld *world, dxBody * const *body, int nb,
-			  dxJoint * const *joint, int nj, dReal stepsize)
+			  dxJoint **joint, int nj, dReal stepsize)
 {
 # ifndef COMPARE_METHODS
   dInternalStepIsland_x2 (world,body,nb,joint,nj,stepsize);
