@@ -129,6 +129,7 @@ dGeomSphereSetRadius
 dGeomTransformGetCleanup
 dGeomTransformGetGeom
 dGeomTransformGetInfo
+dGeomTransformGetFinalPos
 dGeomTransformSetCleanup
 dGeomTransformSetGeom
 dGeomTransformSetInfo

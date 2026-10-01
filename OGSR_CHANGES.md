@@ -290,3 +290,7 @@ Verified by building the library with the engine's flags (VS 2026 v145, C++23, `
 Considered and **not** ported: `dRandInt` rewrite (not used on live paths), capsule-box denormal fix (the engine has no capsules), `dGeomBoxPointDepth` (unused), QuickStep row-order optimisation `8a921d02` (changes behaviour), assert-only patches, auto-disable changes (not used).
 
 **Recommended in-game checks** for the behaviour changes: breakable objects (fracture thresholds), grabbing objects (capture), ragdoll limbs resting at joint limits, fixed/animated physics elements, box stacks, doors and car suspension.
+
+## 9. API additions for the engine
+
+- `dGeomTransformGetFinalPos(g)` (2026-10-01): returns the cached final position of a geom transform (`dxGeomTransform::final_pos`, set by `computeAABB`). OGSR `PHMoveStorage.cpp` used to read it by re-declaring the private struct from `collision_transform.cpp` (an ODR violation that breaks silently if the layout changes). `collision.h`, `collision_transform.cpp`, `msvcdefs.def`.
