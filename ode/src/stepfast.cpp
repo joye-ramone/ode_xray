@@ -121,7 +121,10 @@ MultiplyAdd2_sym_p8p (dReal * A, dReal * B, dReal * C, int p, int Askip)
 			sum += bb[5] * cc[5];
 			sum += bb[6] * cc[6];
 			*(aa++) += sum;
-			*ad += sum;
+			// on the diagonal (j == i) aa and ad point at the same element,
+			// so add the product only once
+			if (j != i)
+				*ad += sum;
 			ad += Askip;
 			cc += 8;
 		}

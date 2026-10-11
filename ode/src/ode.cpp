@@ -37,12 +37,23 @@
 #include "util.h"
 #include <ode/memory.h>
 #include <ode/error.h>
+#include "validate.h"
 
 // misc defines
 #define ALLOCA dALLOCA16
 
 //****************************************************************************
 // utility
+dReal dxWorld::global_cfm=REAL(1.1363636e-006);
+dReal dxWorld::global_erp=REAL(0.54545456);
+dVector3 dxWorld::gravity={REAL(0.),REAL(-1.),REAL(0.)};
+dxAutoDisable dxWorld::adis = {REAL(0.001)*REAL(0.001), REAL(0.001)*REAL(0.001), 10, 0};
+
+int dxWorld::adis_flag=0;			// auto-disable flag for new bodies
+dxQuickStepParameters dxWorld:: qs={20,REAL(1.1)};
+dxContactParameters dxWorld::contactp={dInfinity,0.001f};
+
+
 
 static inline void initObject (dObject *obj, dxWorld *w)
 {
@@ -221,10 +232,26 @@ void dWorldCheck (dxWorld *w)
 
 //****************************************************************************
 // body
+void	dWorldRemoveBody(dxWorld *w, dxBody* b)
+{
+	dAASSERT (w);dAASSERT (b);dAASSERT(b->world==w);
+	removeObjectFromList (b);
+	b->world->nb--;
+	b->world=0;
+}
+
+
+void	dWorldAddBody(dxWorld *w, dxBody *b)
+{
+	dAASSERT (w);dAASSERT (b);
+	b->world=w;
+	addObjectToList (b,(dObject **) &w->firstbody);
+	w->nb++;
+}
 
 dxBody *dBodyCreate (dxWorld *w)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   dxBody *b = new dxBody;
   initObject (b,w);
   b->firstjoint = 0;
@@ -245,17 +272,15 @@ dxBody *dBodyCreate (dxWorld *w)
   dSetZero (b->facc,4);
   dSetZero (b->tacc,4);
   dSetZero (b->finite_rot_axis,4);
-  addObjectToList (b,(dObject **) &w->firstbody);
-  w->nb++;
+  if (w)	dWorldAddBody(w,b);
 
   // set auto-disable parameters
   dBodySetAutoDisableDefaults (b);	// must do this after adding to world
-  b->adis_stepsleft = b->adis.idle_steps;
-  b->adis_timeleft = b->adis.idle_time;
+//  b->adis_stepsleft = b->adis.idle_steps;
+//  b->adis_timeleft	= b->adis.idle_time;
 
   return b;
 }
-
 
 void dBodyDestroy (dxBody *b)
 {
@@ -282,8 +307,7 @@ void dBodyDestroy (dxBody *b)
     removeJointReferencesFromAttachedBodies (n->joint);
     n = next;
   }
-  removeObjectFromList (b);
-  b->world->nb--;
+  if (b->world) dWorldRemoveBody	(b->world,b);
   delete b;
 }
 
@@ -305,6 +329,7 @@ void *dBodyGetData (dBodyID b)
 void dBodySetPosition (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetPosition","%g %g %g",(double) x,(double) y,(double) z);
   b->pos[0] = x;
   b->pos[1] = y;
   b->pos[2] = z;
@@ -318,6 +343,7 @@ void dBodySetPosition (dBodyID b, dReal x, dReal y, dReal z)
 void dBodySetRotation (dBodyID b, const dMatrix3 R)
 {
   dAASSERT (b && R);
+  dVALIDATE (dxFiniteR (R),"dBodySetRotation","rotation not finite");
   dQuaternion q;
   dRtoQ (R,q);
   dNormalize4 (q);
@@ -336,6 +362,7 @@ void dBodySetRotation (dBodyID b, const dMatrix3 R)
 void dBodySetQuaternion (dBodyID b, const dQuaternion q)
 {
   dAASSERT (b && q);
+  dVALIDATE (dxFinite4 (q) && q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3] > REAL(1e-12),"dBodySetQuaternion","%g %g %g %g",(double) q[0],(double) q[1],(double) q[2],(double) q[3]);
   b->q[0] = q[0];
   b->q[1] = q[1];
   b->q[2] = q[2];
@@ -352,6 +379,7 @@ void dBodySetQuaternion (dBodyID b, const dQuaternion q)
 void dBodySetLinearVel  (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetLinearVel","%g %g %g",(double) x,(double) y,(double) z);
   b->lvel[0] = x;
   b->lvel[1] = y;
   b->lvel[2] = z;
@@ -361,6 +389,7 @@ void dBodySetLinearVel  (dBodyID b, dReal x, dReal y, dReal z)
 void dBodySetAngularVel (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetAngularVel","%g %g %g",(double) x,(double) y,(double) z);
   b->avel[0] = x;
   b->avel[1] = y;
   b->avel[2] = z;
@@ -405,6 +434,7 @@ const dReal * dBodyGetAngularVel (dBodyID b)
 void dBodySetMass (dBodyID b, const dMass *mass)
 {
   dAASSERT (b && mass);
+  dVALIDATE (dxMassValid (mass),"dBodySetMass","mass %g, inertia %g %g %g: not finite, not positive or not positive definite; the body keeps its mass",(double) mass->mass,(double) mass->I[0],(double) mass->I[5],(double) mass->I[10]);
   memcpy (&b->mass,mass,sizeof(dMass));
   if (dInvertPDMatrix (b->mass.I,b->invI,3)==0) {
     dDEBUGMSG ("inertia must be positive definite");
@@ -424,6 +454,7 @@ void dBodyGetMass (dBodyID b, dMass *mass)
 void dBodyAddForce (dBodyID b, dReal fx, dReal fy, dReal fz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz),"dBodyAddForce","%g %g %g",(double) fx,(double) fy,(double) fz);
   b->facc[0] += fx;
   b->facc[1] += fy;
   b->facc[2] += fz;
@@ -433,6 +464,7 @@ void dBodyAddForce (dBodyID b, dReal fx, dReal fy, dReal fz)
 void dBodyAddTorque (dBodyID b, dReal fx, dReal fy, dReal fz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz),"dBodyAddTorque","%g %g %g",(double) fx,(double) fy,(double) fz);
   b->tacc[0] += fx;
   b->tacc[1] += fy;
   b->tacc[2] += fz;
@@ -442,6 +474,7 @@ void dBodyAddTorque (dBodyID b, dReal fx, dReal fy, dReal fz)
 void dBodyAddRelForce (dBodyID b, dReal fx, dReal fy, dReal fz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz),"dBodyAddRelForce","%g %g %g",(double) fx,(double) fy,(double) fz);
   dVector3 t1,t2;
   t1[0] = fx;
   t1[1] = fy;
@@ -457,6 +490,7 @@ void dBodyAddRelForce (dBodyID b, dReal fx, dReal fy, dReal fz)
 void dBodyAddRelTorque (dBodyID b, dReal fx, dReal fy, dReal fz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz),"dBodyAddRelTorque","%g %g %g",(double) fx,(double) fy,(double) fz);
   dVector3 t1,t2;
   t1[0] = fx;
   t1[1] = fy;
@@ -473,6 +507,7 @@ void dBodyAddForceAtPos (dBodyID b, dReal fx, dReal fy, dReal fz,
 			 dReal px, dReal py, dReal pz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz) && dxFinite3 (px,py,pz),"dBodyAddForceAtPos","force %g %g %g at %g %g %g",(double) fx,(double) fy,(double) fz,(double) px,(double) py,(double) pz);
   b->facc[0] += fx;
   b->facc[1] += fy;
   b->facc[2] += fz;
@@ -491,6 +526,7 @@ void dBodyAddForceAtRelPos (dBodyID b, dReal fx, dReal fy, dReal fz,
 			    dReal px, dReal py, dReal pz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz) && dxFinite3 (px,py,pz),"dBodyAddForceAtRelPos","force %g %g %g at %g %g %g",(double) fx,(double) fy,(double) fz,(double) px,(double) py,(double) pz);
   dVector3 prel,f,p;
   f[0] = fx;
   f[1] = fy;
@@ -512,6 +548,7 @@ void dBodyAddRelForceAtPos (dBodyID b, dReal fx, dReal fy, dReal fz,
 			    dReal px, dReal py, dReal pz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz) && dxFinite3 (px,py,pz),"dBodyAddRelForceAtPos","force %g %g %g at %g %g %g",(double) fx,(double) fy,(double) fz,(double) px,(double) py,(double) pz);
   dVector3 frel,f;
   frel[0] = fx;
   frel[1] = fy;
@@ -533,6 +570,7 @@ void dBodyAddRelForceAtRelPos (dBodyID b, dReal fx, dReal fy, dReal fz,
 			       dReal px, dReal py, dReal pz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz) && dxFinite3 (px,py,pz),"dBodyAddRelForceAtRelPos","force %g %g %g at %g %g %g",(double) fx,(double) fy,(double) fz,(double) px,(double) py,(double) pz);
   dVector3 frel,prel,f,p;
   frel[0] = fx;
   frel[1] = fy;
@@ -568,6 +606,7 @@ const dReal * dBodyGetTorque (dBodyID b)
 void dBodySetForce (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetForce","%g %g %g",(double) x,(double) y,(double) z);
   b->facc[0] = x;
   b->facc[1] = y;
   b->facc[2] = z;
@@ -577,6 +616,7 @@ void dBodySetForce (dBodyID b, dReal x, dReal y, dReal z)
 void dBodySetTorque (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetTorque","%g %g %g",(double) x,(double) y,(double) z);
   b->tacc[0] = x;
   b->tacc[1] = y;
   b->tacc[2] = z;
@@ -688,6 +728,7 @@ void dBodySetFiniteRotationMode (dBodyID b, int mode)
 void dBodySetFiniteRotationAxis (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetFiniteRotationAxis","%g %g %g",(double) x,(double) y,(double) z);
   b->finite_rot_axis[0] = x;
   b->finite_rot_axis[1] = y;
   b->finite_rot_axis[2] = z;
@@ -741,8 +782,8 @@ void dBodyEnable (dBodyID b)
 {
   dAASSERT (b);
   b->flags &= ~dxBodyDisabled;
-  b->adis_stepsleft = b->adis.idle_steps;
-  b->adis_timeleft = b->adis.idle_time;
+ // b->adis_stepsleft = b->adis.idle_steps;
+ // b->adis_timeleft = b->adis.idle_time;
 }
 
 
@@ -774,62 +815,74 @@ int dBodyGetGravityMode (dBodyID b)
   return ((b->flags & dxBodyNoGravity) == 0);
 }
 
+void dBodySetNoUpdatePosMode(dBodyID b, int enabled)
+{
+	dAASSERT(b);
+	if (enabled) b->flags |= dxBodyNoUpdatePos;
+	else b->flags &= ~dxBodyNoUpdatePos;
+}
+
+int dBodyGetNoUpdatePosMode(dBodyID b)
+{
+	dAASSERT(b);
+	return ((b->flags & dxBodyNoUpdatePos) != 0);
+}
 
 // body auto-disable functions
 
 dReal dBodyGetAutoDisableLinearThreshold (dBodyID b)
 {
 	dAASSERT(b);
-	return dSqrt (b->adis.linear_threshold);
+	return 0.f;//dSqrt (b->adis.linear_threshold);
 }
 
 
 void dBodySetAutoDisableLinearThreshold (dBodyID b, dReal linear_threshold)
 {
 	dAASSERT(b);
-	b->adis.linear_threshold = linear_threshold * linear_threshold;
+//	b->adis.linear_threshold = linear_threshold * linear_threshold;
 }
 
 
 dReal dBodyGetAutoDisableAngularThreshold (dBodyID b)
 {
 	dAASSERT(b);
-	return dSqrt (b->adis.angular_threshold);
+	return 0.f;//dSqrt (b->adis.angular_threshold);
 }
 
 
 void dBodySetAutoDisableAngularThreshold (dBodyID b, dReal angular_threshold)
 {
 	dAASSERT(b);
-	b->adis.angular_threshold = angular_threshold * angular_threshold;
+//	b->adis.angular_threshold = angular_threshold * angular_threshold;
 }
 
 
 int dBodyGetAutoDisableSteps (dBodyID b)
 {
 	dAASSERT(b);
-	return b->adis.idle_steps;
+	return 0;//b->adis.idle_steps;
 }
 
 
 void dBodySetAutoDisableSteps (dBodyID b, int steps)
 {
 	dAASSERT(b);
-	b->adis.idle_steps = steps;
+	//b->adis.idle_steps = steps;
 }
 
 
 dReal dBodyGetAutoDisableTime (dBodyID b)
 {
 	dAASSERT(b);
-	return b->adis.idle_time;
+	return 0.f;//b->adis.idle_time;
 }
 
 
 void dBodySetAutoDisableTime (dBodyID b, dReal time)
 {
 	dAASSERT(b);
-	b->adis.idle_time = time;
+	//b->adis.idle_time = time;
 }
 
 
@@ -852,17 +905,35 @@ void dBodySetAutoDisableDefaults (dBodyID b)
 {
 	dAASSERT(b);
 	dWorldID w = b->world;
-	dAASSERT(w);
-	b->adis = w->adis;
-	dBodySetAutoDisableFlag (b, w->adis_flag);
+	//dAASSERT(w);
+	//b->adis.linear_threshold = dWorldGetAutoDisableLinearThreshold (w);
+	//b->adis.angular_threshold = dWorldGetAutoDisableAngularThreshold (w);
+	//b->adis.idle_steps = dWorldGetAutoDisableSteps (w);
+	//b->adis.idle_time = dWorldGetAutoDisableTime (w);
+	dBodySetAutoDisableFlag (b, false);	//. 
 }
 
 //****************************************************************************
 // joints
+void	dWorldAddJoint(dxWorld *w,dxJoint *j)
+{
+	dIASSERT (j&&w);
+	j->world=w;
+	addObjectToList (j,(dObject **) &w->firstjoint);
+	w->nj++;
+
+}
+void	dWorldRemoveJoint(dxWorld* w,dxJoint *j)
+{
+	dIASSERT(w&&j&&w==j->world);
+	removeObjectFromList((dObject*)j);
+	w->nj--;
+	j->world=0;
+}
 
 static void dJointInit (dxWorld *w, dxJoint *j)
 {
-  dIASSERT (w && j);
+  dIASSERT (j);
   initObject (j,w);
   j->vtable = 0;
   j->flags = 0;
@@ -873,15 +944,14 @@ static void dJointInit (dxWorld *w, dxJoint *j)
   j->node[1].body = 0;
   j->node[1].next = 0;
   dSetZero (j->lambda,6);
-  addObjectToList (j,(dObject **) &w->firstjoint);
-  w->nj++;
+  if (w) dWorldAddJoint(w,j);
 }
 
 
 static dxJoint *createJoint (dWorldID w, dJointGroupID group,
 			     dxJoint::Vtable *vtable)
 {
-  dIASSERT (w && vtable);
+  dIASSERT (vtable);
   dxJoint *j;
   if (group) {
     j = (dxJoint*) group->stack.alloc (vtable->size);
@@ -899,21 +969,21 @@ static dxJoint *createJoint (dWorldID w, dJointGroupID group,
 
 dxJoint * dJointCreateBall (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+ // dAASSERT (w);
   return createJoint (w,group,&__dball_vtable);
 }
 
 
 dxJoint * dJointCreateHinge (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__dhinge_vtable);
 }
 
 
 dxJoint * dJointCreateSlider (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+ // dAASSERT (w);
   return createJoint (w,group,&__dslider_vtable);
 }
 
@@ -921,45 +991,52 @@ dxJoint * dJointCreateSlider (dWorldID w, dJointGroupID group)
 dxJoint * dJointCreateContact (dWorldID w, dJointGroupID group,
 			       const dContact *c)
 {
-  dAASSERT (w && c);
+  dAASSERT (c);
   dxJointContact *j = (dxJointContact *)
     createJoint (w,group,&__dcontact_vtable);
   j->contact = *c;
   return j;
 }
-
-
+dxJoint * dJointCreateContactSpecial (dWorldID w, dJointGroupID group,
+							   const dContact *c)
+{
+	dAASSERT (c);
+	dxJointContact *j = (dxJointContact *)
+		createJoint (w,group,&__dcontact_special_vtable);
+	j->contact = *c;
+	return j;
+}
 dxJoint * dJointCreateHinge2 (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__dhinge2_vtable);
 }
 
 
 dxJoint * dJointCreateUniversal (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__duniversal_vtable);
 }
 
 
 dxJoint * dJointCreateFixed (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__dfixed_vtable);
 }
 
 
 dxJoint * dJointCreateNull (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+ // dAASSERT (w);
   return createJoint (w,group,&__dnull_vtable);
 }
 
 
 dxJoint * dJointCreateAMotor (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__damotor_vtable);
 }
 
@@ -969,8 +1046,10 @@ void dJointDestroy (dxJoint *j)
   dAASSERT (j);
   if (j->flags & dJOINT_INGROUP) return;
   removeJointReferencesFromAttachedBodies (j);
-  removeObjectFromList (j);
-  j->world->nj--;
+  if (j->world)		{
+	  removeObjectFromList (j);
+	  j->world->nj--;
+  }
   dFree (j,j->vtable->size);
 }
 
@@ -1009,12 +1088,13 @@ void dJointGroupEmpty (dJointGroupID group)
     jlist[i] = j;
     j = (dxJoint*) (group->stack.next (j->vtable->size));
   }
+  // X-Ray: joints are not unlinked from the world list here (the engine's
+  // CPHIsland truncates its joint list itself), but body references are
+  // always removed, also for joints that were attached without being added
+  // to a world - otherwise bodies would keep pointers into the freed group.
+  // this is a no-op for joints whose bodies were already detached.
   for (i=group->num-1; i >= 0; i--) {
-    if (jlist[i]->world) {
-      removeJointReferencesFromAttachedBodies (jlist[i]);
-      removeObjectFromList (jlist[i]);
-      jlist[i]->world->nj--;
-    }
+    removeJointReferencesFromAttachedBodies (jlist[i]);
   }
   group->num = 0;
   group->stack.freeAll();
@@ -1026,10 +1106,10 @@ void dJointAttach (dxJoint *joint, dxBody *body1, dxBody *body2)
   // check arguments
   dUASSERT (joint,"bad joint argument");
   dUASSERT (body1 == 0 || body1 != body2,"can't have body1==body2");
-  dxWorld *world = joint->world;
-  dUASSERT ( (!body1 || body1->world == world) &&
-	     (!body2 || body2->world == world),
-	     "joint and bodies must be in same world");
+  //dxWorld *world = joint->world;
+  //dUASSERT ( (!body1 || body1->world == world) &&
+	//     (!body2 || body2->world == world),
+	//     "joint and bodies must be in same world");
 
   // check if the joint can not be attached to just one body
   dUASSERT (!((joint->flags & dJOINT_TWOBODIES) &&
@@ -1158,15 +1238,15 @@ dxWorld * dWorldCreate()
 
   w->adis.linear_threshold = REAL(0.001)*REAL(0.001);	// (magnitude squared)
   w->adis.angular_threshold = REAL(0.001)*REAL(0.001);	// (magnitude squared)
-  w->adis.idle_steps = 10;
-  w->adis.idle_time = 0;
-  w->adis_flag = 0;
+  w->adis.idle_steps	= 10;
+  w->adis.idle_time		= 0;
+  w->adis_flag			= 0;
 
-  w->qs.num_iterations = 20;
-  w->qs.w = REAL(1.3);
+  w->qs.num_iterations	= 20;			// 20 is Default
+  w->qs.w				= REAL(1.1);	// 1.3 is Russ Default, 1.05
 
-  w->contactp.max_vel = dInfinity;
-  w->contactp.min_depth = 0;
+  w->contactp.max_vel	= dInfinity;
+  w->contactp.min_depth = 0.001f;		// should be 0
 
   return w;
 }
@@ -1205,7 +1285,8 @@ void dWorldDestroy (dxWorld *w)
 
 void dWorldSetGravity (dWorldID w, dReal x, dReal y, dReal z)
 {
-  dAASSERT (w);
+  dVALIDATE (dxFinite3 (x,y,z),"dWorldSetGravity","%g %g %g",(double) x,(double) y,(double) z);
+  ///dAASSERT (w);
   w->gravity[0] = x;
   w->gravity[1] = y;
   w->gravity[2] = z;
@@ -1223,7 +1304,8 @@ void dWorldGetGravity (dWorldID w, dVector3 g)
 
 void dWorldSetERP (dWorldID w, dReal erp)
 {
-  dAASSERT (w);
+  dVALIDATE (dxFinite (erp) && erp >= 0 && erp <= 1,"dWorldSetERP","%g",(double) erp);
+ // dAASSERT (w);
   w->global_erp = erp;
 }
 
@@ -1237,7 +1319,8 @@ dReal dWorldGetERP (dWorldID w)
 
 void dWorldSetCFM (dWorldID w, dReal cfm)
 {
-  dAASSERT (w);
+  dVALIDATE (dxFinite (cfm) && cfm >= 0,"dWorldSetCFM","%g",(double) cfm);
+  //dAASSERT (w);
   w->global_cfm = cfm;
 }
 
@@ -1282,126 +1365,128 @@ void dWorldImpulseToForce (dWorldID w, dReal stepsize,
 
 dReal dWorldGetAutoDisableLinearThreshold (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return dSqrt (w->adis.linear_threshold);
 }
 
 
 void dWorldSetAutoDisableLinearThreshold (dWorldID w, dReal linear_threshold)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis.linear_threshold = linear_threshold * linear_threshold;
 }
 
 
 dReal dWorldGetAutoDisableAngularThreshold (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return dSqrt (w->adis.angular_threshold);
 }
 
 
 void dWorldSetAutoDisableAngularThreshold (dWorldID w, dReal angular_threshold)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis.angular_threshold = angular_threshold * angular_threshold;
 }
 
 
 int dWorldGetAutoDisableSteps (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->adis.idle_steps;
 }
 
 
 void dWorldSetAutoDisableSteps (dWorldID w, int steps)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis.idle_steps = steps;
 }
 
 
 dReal dWorldGetAutoDisableTime (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->adis.idle_time;
 }
 
 
 void dWorldSetAutoDisableTime (dWorldID w, dReal time)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis.idle_time = time;
 }
 
 
 int dWorldGetAutoDisableFlag (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->adis_flag;
 }
 
 
 void dWorldSetAutoDisableFlag (dWorldID w, int do_auto_disable)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis_flag = (do_auto_disable != 0);
 }
 
 
 void dWorldSetQuickStepNumIterations (dWorldID w, int num)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->qs.num_iterations = num;
 }
 
 
 int dWorldGetQuickStepNumIterations (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->qs.num_iterations;
 }
 
 
 void dWorldSetQuickStepW (dWorldID w, dReal param)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->qs.w = param;
 }
 
 
 dReal dWorldGetQuickStepW (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->qs.w;
 }
 
 
 void dWorldSetContactMaxCorrectingVel (dWorldID w, dReal vel)
 {
-	dAASSERT(w);
+  dVALIDATE (dxFinite (vel) && vel >= 0,"dWorldSetContactMaxCorrectingVel","%g",(double) vel);
+	//dAASSERT(w);
 	w->contactp.max_vel = vel;
 }
 
 
 dReal dWorldGetContactMaxCorrectingVel (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->contactp.max_vel;
 }
 
 
 void dWorldSetContactSurfaceLayer (dWorldID w, dReal depth)
 {
-	dAASSERT(w);
+  dVALIDATE (dxFinite (depth) && depth >= 0,"dWorldSetContactSurfaceLayer","%g",(double) depth);
+	//dAASSERT(w);
 	w->contactp.min_depth = depth;
 }
 
 
 dReal dWorldGetContactSurfaceLayer (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->contactp.min_depth;
 }
 

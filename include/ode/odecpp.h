@@ -73,7 +73,7 @@ public:
   int getAutoEnableDepthSF1(dWorldID)
     { return dWorldGetAutoEnableDepthSF1 (_id); }
 
-  void  setAutoDisableLinearThreshold (dReal threshold) 
+  void  setAutoDisableLinearThreshold (dReal threshold)
     { dWorldSetAutoDisableLinearThreshold (_id,threshold); }
   dReal getAutoDisableLinearThreshold()
     { return dWorldGetAutoDisableLinearThreshold (_id); }
@@ -230,7 +230,7 @@ public:
   int isConnectedTo (dBodyID body) const
     { return dAreConnected (_id, body); }
 
-  void  setAutoDisableLinearThreshold (dReal threshold) 
+  void  setAutoDisableLinearThreshold (dReal threshold)
     { dBodySetAutoDisableLinearThreshold (_id,threshold); }
   dReal getAutoDisableLinearThreshold()
     { return dBodyGetAutoDisableLinearThreshold (_id); }

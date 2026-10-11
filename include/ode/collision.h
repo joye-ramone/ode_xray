@@ -143,6 +143,8 @@ void dGeomTransformSetCleanup (dGeomID g, int mode);
 int dGeomTransformGetCleanup (dGeomID g);
 void dGeomTransformSetInfo (dGeomID g, int mode);
 int dGeomTransformGetInfo (dGeomID g);
+/* X-Ray: cached final position of the transformed geom (set by computeAABB) */
+const dReal *dGeomTransformGetFinalPos (dGeomID g);
 
 /* ************************************************************************ */
 /* utility functions */

@@ -36,6 +36,7 @@ for geometry objects
 #include "collision_std.h"
 #include "collision_transform.h"
 #include "collision_trimesh_internal.h"
+#include "validate.h"
 
 #ifdef _MSC_VER
 #pragma warning(disable:4291)  // for VC++, no complaints about "no matching operator delete found"
@@ -338,6 +339,7 @@ void dGeomSetPosition (dxGeom *g, dReal x, dReal y, dReal z)
   dAASSERT (g);
   dUASSERT (g->gflags & GEOM_PLACEABLE,"geom must be placeable");
   CHECK_NOT_LOCKED (g->parent_space);
+  dVALIDATE (dxFinite3 (x,y,z),"dGeomSetPosition","%g %g %g",(double) x,(double) y,(double) z);
   if (g->body) {
     // this will call dGeomMoved (g), so we don't have to
     dBodySetPosition (g->body,x,y,z);
@@ -356,6 +358,7 @@ void dGeomSetRotation (dxGeom *g, const dMatrix3 R)
   dAASSERT (g && R);
   dUASSERT (g->gflags & GEOM_PLACEABLE,"geom must be placeable");
   CHECK_NOT_LOCKED (g->parent_space);
+  dVALIDATE (dxFiniteR (R),"dGeomSetRotation","rotation not finite");
   if (g->body) {
     // this will call dGeomMoved (g), so we don't have to
     dBodySetRotation (g->body,R);
@@ -372,6 +375,7 @@ void dGeomSetQuaternion (dxGeom *g, const dQuaternion quat)
   dAASSERT (g && quat);
   dUASSERT (g->gflags & GEOM_PLACEABLE,"geom must be placeable");
   CHECK_NOT_LOCKED (g->parent_space);
+  dVALIDATE (dxFinite4 (quat) && quat[0]*quat[0]+quat[1]*quat[1]+quat[2]*quat[2]+quat[3]*quat[3] > REAL(1e-12),"dGeomSetQuaternion","%g %g %g %g",(double) quat[0],(double) quat[1],(double) quat[2],(double) quat[3]);
   if (g->body) {
     // this will call dGeomMoved (g), so we don't have to
     dBodySetQuaternion (g->body,quat);

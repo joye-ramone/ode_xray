@@ -229,3 +229,12 @@ int dGeomTransformGetInfo (dGeomID g)
   dxGeomTransform *tr = (dxGeomTransform*) g;
   return tr->infomode;
 }
+
+
+const dReal *dGeomTransformGetFinalPos (dGeomID g)
+{
+  dUASSERT (g && g->type == dGeomTransformClass,
+	    "argument not a geom transform");
+  dxGeomTransform *tr = (dxGeomTransform*) g;
+  return tr->final_pos;
+}
