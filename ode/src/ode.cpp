@@ -37,6 +37,7 @@
 #include "util.h"
 #include <ode/memory.h>
 #include <ode/error.h>
+#include "validate.h"
 
 // misc defines
 #define ALLOCA dALLOCA16
@@ -328,6 +329,7 @@ void *dBodyGetData (dBodyID b)
 void dBodySetPosition (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetPosition","%g %g %g",(double) x,(double) y,(double) z);
   b->pos[0] = x;
   b->pos[1] = y;
   b->pos[2] = z;
@@ -341,6 +343,7 @@ void dBodySetPosition (dBodyID b, dReal x, dReal y, dReal z)
 void dBodySetRotation (dBodyID b, const dMatrix3 R)
 {
   dAASSERT (b && R);
+  dVALIDATE (dxFiniteR (R),"dBodySetRotation","rotation not finite");
   dQuaternion q;
   dRtoQ (R,q);
   dNormalize4 (q);
@@ -359,6 +362,7 @@ void dBodySetRotation (dBodyID b, const dMatrix3 R)
 void dBodySetQuaternion (dBodyID b, const dQuaternion q)
 {
   dAASSERT (b && q);
+  dVALIDATE (dxFinite4 (q) && q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3] > REAL(1e-12),"dBodySetQuaternion","%g %g %g %g",(double) q[0],(double) q[1],(double) q[2],(double) q[3]);
   b->q[0] = q[0];
   b->q[1] = q[1];
   b->q[2] = q[2];
@@ -375,6 +379,7 @@ void dBodySetQuaternion (dBodyID b, const dQuaternion q)
 void dBodySetLinearVel  (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetLinearVel","%g %g %g",(double) x,(double) y,(double) z);
   b->lvel[0] = x;
   b->lvel[1] = y;
   b->lvel[2] = z;
@@ -384,6 +389,7 @@ void dBodySetLinearVel  (dBodyID b, dReal x, dReal y, dReal z)
 void dBodySetAngularVel (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetAngularVel","%g %g %g",(double) x,(double) y,(double) z);
   b->avel[0] = x;
   b->avel[1] = y;
   b->avel[2] = z;
@@ -428,6 +434,7 @@ const dReal * dBodyGetAngularVel (dBodyID b)
 void dBodySetMass (dBodyID b, const dMass *mass)
 {
   dAASSERT (b && mass);
+  dVALIDATE (dxMassValid (mass),"dBodySetMass","mass %g, inertia %g %g %g: not finite, not positive or not positive definite; the body keeps its mass",(double) mass->mass,(double) mass->I[0],(double) mass->I[5],(double) mass->I[10]);
   memcpy (&b->mass,mass,sizeof(dMass));
   if (dInvertPDMatrix (b->mass.I,b->invI,3)==0) {
     dDEBUGMSG ("inertia must be positive definite");
@@ -447,6 +454,7 @@ void dBodyGetMass (dBodyID b, dMass *mass)
 void dBodyAddForce (dBodyID b, dReal fx, dReal fy, dReal fz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz),"dBodyAddForce","%g %g %g",(double) fx,(double) fy,(double) fz);
   b->facc[0] += fx;
   b->facc[1] += fy;
   b->facc[2] += fz;
@@ -456,6 +464,7 @@ void dBodyAddForce (dBodyID b, dReal fx, dReal fy, dReal fz)
 void dBodyAddTorque (dBodyID b, dReal fx, dReal fy, dReal fz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz),"dBodyAddTorque","%g %g %g",(double) fx,(double) fy,(double) fz);
   b->tacc[0] += fx;
   b->tacc[1] += fy;
   b->tacc[2] += fz;
@@ -465,6 +474,7 @@ void dBodyAddTorque (dBodyID b, dReal fx, dReal fy, dReal fz)
 void dBodyAddRelForce (dBodyID b, dReal fx, dReal fy, dReal fz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz),"dBodyAddRelForce","%g %g %g",(double) fx,(double) fy,(double) fz);
   dVector3 t1,t2;
   t1[0] = fx;
   t1[1] = fy;
@@ -480,6 +490,7 @@ void dBodyAddRelForce (dBodyID b, dReal fx, dReal fy, dReal fz)
 void dBodyAddRelTorque (dBodyID b, dReal fx, dReal fy, dReal fz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz),"dBodyAddRelTorque","%g %g %g",(double) fx,(double) fy,(double) fz);
   dVector3 t1,t2;
   t1[0] = fx;
   t1[1] = fy;
@@ -496,6 +507,7 @@ void dBodyAddForceAtPos (dBodyID b, dReal fx, dReal fy, dReal fz,
 			 dReal px, dReal py, dReal pz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz) && dxFinite3 (px,py,pz),"dBodyAddForceAtPos","force %g %g %g at %g %g %g",(double) fx,(double) fy,(double) fz,(double) px,(double) py,(double) pz);
   b->facc[0] += fx;
   b->facc[1] += fy;
   b->facc[2] += fz;
@@ -514,6 +526,7 @@ void dBodyAddForceAtRelPos (dBodyID b, dReal fx, dReal fy, dReal fz,
 			    dReal px, dReal py, dReal pz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz) && dxFinite3 (px,py,pz),"dBodyAddForceAtRelPos","force %g %g %g at %g %g %g",(double) fx,(double) fy,(double) fz,(double) px,(double) py,(double) pz);
   dVector3 prel,f,p;
   f[0] = fx;
   f[1] = fy;
@@ -535,6 +548,7 @@ void dBodyAddRelForceAtPos (dBodyID b, dReal fx, dReal fy, dReal fz,
 			    dReal px, dReal py, dReal pz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz) && dxFinite3 (px,py,pz),"dBodyAddRelForceAtPos","force %g %g %g at %g %g %g",(double) fx,(double) fy,(double) fz,(double) px,(double) py,(double) pz);
   dVector3 frel,f;
   frel[0] = fx;
   frel[1] = fy;
@@ -556,6 +570,7 @@ void dBodyAddRelForceAtRelPos (dBodyID b, dReal fx, dReal fy, dReal fz,
 			       dReal px, dReal py, dReal pz)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (fx,fy,fz) && dxFinite3 (px,py,pz),"dBodyAddRelForceAtRelPos","force %g %g %g at %g %g %g",(double) fx,(double) fy,(double) fz,(double) px,(double) py,(double) pz);
   dVector3 frel,prel,f,p;
   frel[0] = fx;
   frel[1] = fy;
@@ -591,6 +606,7 @@ const dReal * dBodyGetTorque (dBodyID b)
 void dBodySetForce (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetForce","%g %g %g",(double) x,(double) y,(double) z);
   b->facc[0] = x;
   b->facc[1] = y;
   b->facc[2] = z;
@@ -600,6 +616,7 @@ void dBodySetForce (dBodyID b, dReal x, dReal y, dReal z)
 void dBodySetTorque (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetTorque","%g %g %g",(double) x,(double) y,(double) z);
   b->tacc[0] = x;
   b->tacc[1] = y;
   b->tacc[2] = z;
@@ -711,6 +728,7 @@ void dBodySetFiniteRotationMode (dBodyID b, int mode)
 void dBodySetFiniteRotationAxis (dBodyID b, dReal x, dReal y, dReal z)
 {
   dAASSERT (b);
+  dVALIDATE (dxFinite3 (x,y,z),"dBodySetFiniteRotationAxis","%g %g %g",(double) x,(double) y,(double) z);
   b->finite_rot_axis[0] = x;
   b->finite_rot_axis[1] = y;
   b->finite_rot_axis[2] = z;
@@ -1267,6 +1285,7 @@ void dWorldDestroy (dxWorld *w)
 
 void dWorldSetGravity (dWorldID w, dReal x, dReal y, dReal z)
 {
+  dVALIDATE (dxFinite3 (x,y,z),"dWorldSetGravity","%g %g %g",(double) x,(double) y,(double) z);
   ///dAASSERT (w);
   w->gravity[0] = x;
   w->gravity[1] = y;
@@ -1285,6 +1304,7 @@ void dWorldGetGravity (dWorldID w, dVector3 g)
 
 void dWorldSetERP (dWorldID w, dReal erp)
 {
+  dVALIDATE (dxFinite (erp) && erp >= 0 && erp <= 1,"dWorldSetERP","%g",(double) erp);
  // dAASSERT (w);
   w->global_erp = erp;
 }
@@ -1299,6 +1319,7 @@ dReal dWorldGetERP (dWorldID w)
 
 void dWorldSetCFM (dWorldID w, dReal cfm)
 {
+  dVALIDATE (dxFinite (cfm) && cfm >= 0,"dWorldSetCFM","%g",(double) cfm);
   //dAASSERT (w);
   w->global_cfm = cfm;
 }
@@ -1442,6 +1463,7 @@ dReal dWorldGetQuickStepW (dWorldID w)
 
 void dWorldSetContactMaxCorrectingVel (dWorldID w, dReal vel)
 {
+  dVALIDATE (dxFinite (vel) && vel >= 0,"dWorldSetContactMaxCorrectingVel","%g",(double) vel);
 	//dAASSERT(w);
 	w->contactp.max_vel = vel;
 }
@@ -1456,6 +1478,7 @@ dReal dWorldGetContactMaxCorrectingVel (dWorldID w)
 
 void dWorldSetContactSurfaceLayer (dWorldID w, dReal depth)
 {
+  dVALIDATE (dxFinite (depth) && depth >= 0,"dWorldSetContactSurfaceLayer","%g",(double) depth);
 	//dAASSERT(w);
 	w->contactp.min_depth = depth;
 }

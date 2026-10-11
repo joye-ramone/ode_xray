@@ -33,6 +33,7 @@ transform is the identity.
 #include <ode/rotation.h>
 #include <ode/matrix.h>
 #include "joint.h"
+#include "validate.h"
 
 //****************************************************************************
 // externs
@@ -201,6 +202,7 @@ static void setFixedOrientation(dxJoint *joint, dxJoint::Info2 *info, dQuaternio
 static void setAnchors (dxJoint *j, dReal x, dReal y, dReal z,
 			dVector3 anchor1, dVector3 anchor2)
 {
+  dVALIDATE (dxFinite3 (x,y,z),"dJointSet*Anchor","%g %g %g, the anchor is kept",(double) x,(double) y,(double) z);
   if (j->node[0].body) {
     dReal q[4];
     q[0] = x - j->node[0].body->pos[0];
@@ -231,6 +233,7 @@ static void setAnchors (dxJoint *j, dReal x, dReal y, dReal z,
 static void setAxes (dxJoint *j, dReal x, dReal y, dReal z,
 		     dVector3 axis1, dVector3 axis2)
 {
+  dVALIDATE (dxAxis3 (x,y,z),"dJointSet*Axis","%g %g %g (not finite or zero), the axis is kept",(double) x,(double) y,(double) z);
   if (j->node[0].body) {
     dReal q[4];
     q[0] = x;
@@ -393,8 +396,27 @@ void dxJointLimitMotor::init (dxWorld *world)
 }
 
 
+// every joint parameter setter ends here: stops may be +-dInfinity (no limit), the rest finite; ERP and the fudge factor in [0, 1],
+// CFMs, fmax and bounce >= 0
+static bool limitMotorParamValid (int num, dReal value)
+{
+  switch (num) {
+  case dParamLoStop:
+  case dParamHiStop: return !_isnan (value);
+  case dParamVel: return dxFinite (value);
+  case dParamFMax:
+  case dParamBounce:
+  case dParamCFM:
+  case dParamStopCFM: return dxFinite (value) && value >= 0;
+  case dParamFudgeFactor:
+  case dParamStopERP: return dxFinite (value) && value >= 0 && value <= 1;
+  }
+  return true;
+}
+
 void dxJointLimitMotor::set (int num, dReal value)
 {
+  dVALIDATE (limitMotorParamValid (num,value),"dJointSet*Param","parameter %d: %g",num,(double) value);
   switch (num) {
   case dParamLoStop:
     lostop = value;
@@ -1550,6 +1572,7 @@ extern "C" void dJointSetHinge2Axis1 (dxJointHinge2 *joint,
 {
   dUASSERT(joint,"bad joint argument");
   dUASSERT(joint->vtable == &__dhinge2_vtable,"joint is not a hinge2");
+  dVALIDATE (dxAxis3 (x,y,z),"dJointSetHinge2Axis1","%g %g %g (not finite or zero)",(double) x,(double) y,(double) z);
   if (joint->node[0].body) {
     dReal q[4];
     q[0] = x;
@@ -1573,6 +1596,7 @@ extern "C" void dJointSetHinge2Axis2 (dxJointHinge2 *joint,
 {
   dUASSERT(joint,"bad joint argument");
   dUASSERT(joint->vtable == &__dhinge2_vtable,"joint is not a hinge2");
+  dVALIDATE (dxAxis3 (x,y,z),"dJointSetHinge2Axis2","%g %g %g (not finite or zero)",(double) x,(double) y,(double) z);
   if (joint->node[1].body) {
     dReal q[4];
     q[0] = x;
@@ -1596,6 +1620,7 @@ extern "C" void dJointSetHinge2Param (dxJointHinge2 *joint,
 {
   dUASSERT(joint,"bad joint argument");
   dUASSERT(joint->vtable == &__dhinge2_vtable,"joint is not a hinge2");
+  dVALIDATE (!(parameter == dParamSuspensionERP || parameter == dParamSuspensionCFM) || (dxFinite (value) && value >= 0 && (parameter != dParamSuspensionERP || value <= 1)),"dJointSetHinge2Param","suspension %s %g",parameter == dParamSuspensionERP ? "ERP" : "CFM",(double) value);
   if ((parameter & 0xff00) == 0x100) {
     joint->limot2.set (parameter & 0xff,value);
   }
@@ -2398,6 +2423,7 @@ extern "C" void dJointSetAMotorAxis (dxJointAMotor *joint, int anum, int rel,
   dUASSERT(joint->vtable == &__damotor_vtable,"joint is not an amotor");
   dUASSERT(!(!joint->node[1].body &&  (joint->flags & dJOINT_REVERSE) && rel == 1),"no first body, can't set axis rel=1");
   dUASSERT(!(!joint->node[1].body && !(joint->flags & dJOINT_REVERSE) && rel == 2),"no second body, can't set axis rel=2");
+  dVALIDATE (dxAxis3 (x,y,z),"dJointSetAMotorAxis","axis %d: %g %g %g (not finite or zero)",anum,(double) x,(double) y,(double) z);
   if (anum < 0) anum = 0;
   if (anum > 2) anum = 2;
 
@@ -2437,6 +2463,7 @@ extern "C" void dJointSetAMotorAngle (dxJointAMotor *joint, int anum,
 {
   dAASSERT(joint && anum >= 0 && anum < 3);
   dUASSERT(joint->vtable == &__damotor_vtable,"joint is not an amotor");
+  dVALIDATE (dxFinite (angle),"dJointSetAMotorAngle","axis %d: %g",anum,(double) angle);
   if (joint->mode == dAMotorUser) {
     if (anum < 0) anum = 0;
     if (anum > 2) anum = 2;
@@ -2669,6 +2696,7 @@ extern "C" void dJointSetFixed (dxJointFixed *joint)
 
 extern "C" void dJointSetFixedQuaternionPos (dxJointFixed *joint,dQuaternion quaternion,dReal* pos)
 {
+  dVALIDATE (dxFinite4 (quaternion) && dxFinite3 (pos) && quaternion[0]*quaternion[0]+quaternion[1]*quaternion[1]+quaternion[2]*quaternion[2]+quaternion[3]*quaternion[3] > REAL(1e-12),"dJointSetFixedQuaternionPos","q %g %g %g %g, pos %g %g %g",(double) quaternion[0],(double) quaternion[1],(double) quaternion[2],(double) quaternion[3],(double) pos[0],(double) pos[1],(double) pos[2]);
   // X-Ray: set the target orientation/position of a fixed joint that holds a
   // single body (node[1].body == 0), e.g. an animated physics element
   dUASSERT(joint,"bad joint argument");

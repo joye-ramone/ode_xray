@@ -294,3 +294,44 @@ Considered and **not** ported: `dRandInt` rewrite (not used on live paths), caps
 ## 9. API additions for the engine
 
 - `dGeomTransformGetFinalPos(g)` (2026-10-01): returns the cached final position of a geom transform (`dxGeomTransform::final_pos`, set by `computeAABB`). OGSR `PHMoveStorage.cpp` used to read it by re-declaring the private struct from `collision_transform.cpp` (an ODR violation that breaks silently if the layout changes). `collision.h`, `collision_transform.cpp`, `msvcdefs.def`.
+
+## 10. Runtime argument validation (2026-10-11)
+
+The engine is built with `dNODEBUG`, so every `dIASSERT` / `dUASSERT` / `dAASSERT` is compiled out and a NaN or a zero mass goes straight into the solver. The checks below are runtime ones, independent of `dNODEBUG`, and **off by default** (`dxValidation = 0`): a library user that never calls `dSetValidation` gets the old behaviour and only pays a load and a branch per setter. OGSR turns them on with its console variable `ph_validate` (`agent/physics_PLAN_validation.md` in the engine repo); the engine checks its own inputs first, with object names, so these are the last line.
+
+### API (`include/ode/error.h`, `mass.h`, `msvcdefs.def`)
+| Function | |
+|---|---|
+| `void dSetValidation (int level)` / `int dGetValidation (void)` | 0 off (default), non-zero on |
+| `unsigned dGetValidationFailures (void)` | rejected or reported arguments since the start |
+| `int dMassCheck (const dMass *)` | the mass test below, for callers |
+| message number `d_ERR_VALIDATE` (`common.h`, after `d_ERR_LCP`) | every failure goes to the message handler (`dSetMessageHandler`) as `"<function>: <what>"`; without a handler it is printed like `dMessage` |
+
+`ode/src/validate.h` (internal): `dxFinite`, `dxFinite3`, `dxFinite4`, `dxFiniteR` (a 3x4 rotation), `dxAxis3` (finite and squared length > 1e-12), `dxMassValid`, and the macros `dVALIDATE` (report and return from a void setter), `dVALIDATE_RET` (same with a value) and `dVALIDATE_REPORT` (report only).
+
+### What is checked
+| Where | Check | On failure |
+|---|---|---|
+| `dBodySetPosition`, `Rotation`, `Quaternion` (length > 0), `LinearVel`, `AngularVel`, `SetForce`, `SetTorque`, `AddForce`, `AddTorque`, `AddRel*`, `AddForceAt*` (force and point), `SetFiniteRotationAxis` | finite | call ignored |
+| `dBodySetMass` | `dxMassValid`: finite, mass > 0, inertia symmetric positive definite, centre of mass consistent with it (`checkMass` of `mass.cpp`, which a NaN passes since `NaN <= 0` is false) | the body keeps its mass |
+| `dMassAdjust` | new and old mass finite and > 0 | mass left unchanged (an adjust to 0 gave a zero tensor, from 0 a division by zero) |
+| `dMassSetSphere`/`Total`, `CappedCylinder`/`Total`, `Cylinder`/`Total`, `Box`/`Total` | density or mass finite and > 0, sizes finite and > 0 | reported, computed as before |
+| `dMassSetParameters` | `dxMassValid` of the result | reported |
+| `dWorldSetGravity` (finite), `ERP` (in [0, 1]), `CFM`, `ContactMaxCorrectingVel`, `ContactSurfaceLayer` (finite, >= 0) | as listed | call ignored |
+| `dCreateSphere`, `dCreateBox` | radius / sides finite and > 0 | the bad value becomes 0.01, reported |
+| `dGeomSphereSetRadius`, `dGeomBoxSetLengths` | same | the old size is kept |
+| `dGeomSetPosition`, `Rotation`, `Quaternion` | finite (quaternion length > 0) | call ignored |
+| joint anchors (`setAnchors`: ball, hinge, hinge2, universal) | finite | anchor kept |
+| joint axes (`setAxes`, `dJointSetHinge2Axis1/2`, `dJointSetAMotorAxis`) | `dxAxis3` | axis kept |
+| limit / motor params (`dxJointLimitMotor::set`: every joint's `dParam*`) | `LoStop`, `HiStop` not NaN (+-inf is "no stop"); `Vel` finite; `FMax`, `Bounce`, `CFM`, `StopCFM` finite and >= 0; `FudgeFactor`, `StopERP` in [0, 1] | parameter kept |
+| `dJointSetHinge2Param` suspension ERP (in [0, 1]) and CFM (>= 0) | as listed | parameter kept |
+| `dJointSetAMotorAngle` | finite | ignored |
+| `dJointSetFixedQuaternionPos` | quaternion and position finite, quaternion length > 0 | ignored |
+
+Not checked: getters, the collision callbacks and the steppers' internal values (a NaN created inside the solver still goes on; `step.cpp` / `quickstep.cpp` keep their NaN rejection of the solution, section 8), and `dJointSetFeedback`, `dGeomSetBody`, `dBodyEnable` and the like (pointers, flags).
+
+### First results in OGSR
+- An actor legs object of the mod (`dolg_heavy_outfit_legs`, a character without `ph_box`) created its character spheres and activation box with size 0 on every load; the engine now reports and repairs it before ODE (`ph_validate`).
+- Saved split dead bodies on Generators (`physics\dead_body\skelet_combine_pose_00`): the engine split them with a pivot from a zero bone transform, and every piece reached `dGeomSetPosition` / `dGeomSetRotation` with NaN on each load (found by these checks, with the caller's stack). Fixed in the engine (`CPHFracturesHolder::SplitFromEnd`).
+- With both fixed, the engine's own checks catch everything first: with `ph_validate 1` the regression set reports no ODE-side failure.
+- The LCP messages (`d_ERR_LCP`, "LCP internal error, s <= 0"): the engine had no message handler before, so they were silent; it now logs the first 20 per run, not counted as validation failures.

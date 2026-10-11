@@ -163,3 +163,29 @@ void dMessage (int num, const char *msg, ...)
 
 
 #endif
+
+//****************************************************************************
+// runtime argument validation (OGSR, validate.h)
+
+#include "validate.h"
+#include <stdio.h>
+
+int dxValidation = 0;
+static unsigned validation_failures = 0;
+
+extern "C" void dSetValidation (int level) { dxValidation = level; }
+extern "C" int dGetValidation (void) { return dxValidation; }
+extern "C" unsigned dGetValidationFailures (void) { return validation_failures; }
+
+void dxValidateFail (const char *fn, const char *what, ...)
+{
+  ++validation_failures;
+  char fmt[512];
+  _snprintf (fmt,sizeof(fmt),"%s: %s",fn,what);
+  fmt[sizeof(fmt)-1] = 0;
+  va_list ap;
+  va_start (ap,what);
+  if (message_function) message_function (d_ERR_VALIDATE,fmt,ap);
+  else printMessage (d_ERR_VALIDATE,"ODE validation",fmt,ap);
+  va_end (ap);
+}

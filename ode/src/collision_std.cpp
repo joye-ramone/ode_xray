@@ -37,6 +37,7 @@ dContactGeom::g1 and dContactGeom::g2.
 #include "collision_kernel.h"
 #include "collision_std.h"
 #include "collision_util.h"
+#include "validate.h"
 
 #ifdef _MSC_VER
 #pragma warning(disable:4291)  // for VC++, no complaints about "no matching operator delete found"
@@ -103,6 +104,11 @@ void dxSphere::computeAABB()
 
 dGeomID dCreateSphere (dSpaceID space, dReal radius)
 {
+  // a geom has to be created: a bad radius is reported and replaced with 1 cm
+  if (dxValidation && !(dxFinite (radius) && radius > 0)) {
+    dxValidateFail ("dCreateSphere","radius %g, 0.01 used",(double) radius);
+    radius = REAL(0.01);
+  }
   return new dxSphere (space,radius);
 }
 
@@ -111,6 +117,7 @@ void dGeomSphereSetRadius (dGeomID g, dReal radius)
 {
   dUASSERT (g && g->type == dSphereClass,"argument not a sphere");
   dAASSERT (radius > 0);
+  dVALIDATE (dxFinite (radius) && radius > 0,"dGeomSphereSetRadius","radius %g, kept",(double) radius);
   dxSphere *s = (dxSphere*) g;
   s->radius = radius;
   dGeomMoved (g);
@@ -166,6 +173,13 @@ void dxBox::computeAABB()
 
 dGeomID dCreateBox (dSpaceID space, dReal lx, dReal ly, dReal lz)
 {
+  // a geom has to be created: a bad side is reported and replaced with 1 cm
+  if (dxValidation && !(dxFinite3 (lx,ly,lz) && lx > 0 && ly > 0 && lz > 0)) {
+    dxValidateFail ("dCreateBox","sides %g %g %g, a bad one becomes 0.01",(double) lx,(double) ly,(double) lz);
+    if (!(dxFinite (lx) && lx > 0)) lx = REAL(0.01);
+    if (!(dxFinite (ly) && ly > 0)) ly = REAL(0.01);
+    if (!(dxFinite (lz) && lz > 0)) lz = REAL(0.01);
+  }
   return new dxBox (space,lx,ly,lz);
 }
 
@@ -174,6 +188,7 @@ void dGeomBoxSetLengths (dGeomID g, dReal lx, dReal ly, dReal lz)
 {
   dUASSERT (g && g->type == dBoxClass,"argument not a box");
   dAASSERT (lx > 0 && ly > 0 && lz > 0);
+  dVALIDATE (dxFinite3 (lx,ly,lz) && lx > 0 && ly > 0 && lz > 0,"dGeomBoxSetLengths","sides %g %g %g, kept",(double) lx,(double) ly,(double) lz);
   dxBox *b = (dxBox*) g;
   b->side[0] = lx;
   b->side[1] = ly;

@@ -227,6 +227,7 @@ dMakeRandomMatrix
 dMakeRandomVector
 dMassAdd
 dMassAdjust
+dMassCheck
 dMassRotate
 dMassSetBox
 dMassSetBoxTotal
@@ -268,6 +269,9 @@ dRSetIdentity
 dSetDebugHandler
 dSetErrorHandler
 dSetMessageHandler
+dSetValidation
+dGetValidation
+dGetValidationFailures
 dSetZero
 dSimpleSpaceCreate
 dSolveCholesky
