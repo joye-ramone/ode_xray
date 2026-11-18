@@ -53,6 +53,11 @@ void dWorldSetQuickStepNumIterations (dWorldID, int num);
 int dWorldGetQuickStepNumIterations (dWorldID);
 void dWorldSetQuickStepW (dWorldID, dReal param);
 dReal dWorldGetQuickStepW (dWorldID);
+/* OGSR: QuickStep shuffles the constraint rows with findex < 0 and the friction rows (findex >= 0) separately, so a friction row never
+ * runs before the normal row its limit comes from (upstream b2f959b1). 0 (default): one shuffle of all rows, the original behaviour.
+ * Global for every world (islands are worlds), like the other QuickStep parameters of this fork. */
+void dSetQuickStepGroupShuffle (int on);
+int dGetQuickStepGroupShuffle (void);
 
 /* World contact parameter functions */
 

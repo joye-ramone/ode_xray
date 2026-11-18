@@ -1174,7 +1174,7 @@ extern "C" void dJointAddSliderForce (dxJointSlider *joint, dReal force)
   dUASSERT(joint->vtable == &__dslider_vtable,"joint is not a slider");
 
   if (joint->flags & dJOINT_REVERSE)
-    force -= force;
+    force = -force; // was `force -= force` (always 0); upstream 99f4049d
 
   getAxis (joint,axis,joint->axis1);
   axis[0] *= force;

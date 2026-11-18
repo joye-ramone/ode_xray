@@ -335,3 +335,14 @@ Not checked: getters, the collision callbacks and the steppers' internal values 
 - Saved split dead bodies on Generators (`physics\dead_body\skelet_combine_pose_00`): the engine split them with a pivot from a zero bone transform, and every piece reached `dGeomSetPosition` / `dGeomSetRotation` with NaN on each load (found by these checks, with the caller's stack). Fixed in the engine (`CPHFracturesHolder::SplitFromEnd`).
 - With both fixed, the engine's own checks catch everything first: with `ph_validate 1` the regression set reports no ODE-side failure.
 - The LCP messages (`d_ERR_LCP`, "LCP internal error, s <= 0"): the engine had no message handler before, so they were silent; it now logs the first 20 per run, not counted as validation failures.
+
+## 11. Fixes from upstream after 0.8 (2026-11-18)
+
+Upstream `odedevs/ode` `master` (`232cbe21`, 0.16.6) was checked against this fork for fixes after `heads/0.8` (1049 commits; the triage of the 134 that touch code the fork has is in the engine repo, `agent/physics_PLAN_fixes.md` section 2e).
+
+| Upstream | Fix | Engine impact |
+|---|---|---|
+| `b2f959b1` | QuickStep: the random reorder (`RANDOMLY_REORDER_CONSTRAINTS`, every 4th iteration) shuffled all rows together, so a friction row (`findex >= 0`) could run before the normal row its limit is taken from and use the previous iteration's normal force. Now the `findex < 0` rows and the friction rows are shuffled apart. **Off by default** (a behaviour change): `dSetQuickStepGroupShuffle(int)` / `dGetQuickStepGroupShuffle()` (`include/ode/objects.h`, `msvcdefs.def`), global for every world | every contact of OGSR (`dContactApprox1`) in islands solved by QuickStep; the engine switches it with a `ph_exp_fix_*` flag |
+| `99f4049d` | `dJointAddSliderForce` on a reverse-attached slider did `force -= force` (always 0) instead of `force = -force` | none: OGSR doesn't call it |
+
+Not taken: `fe84a873` (AMotor `dJOINT_REVERSE`): OGSR's `CPHJoint` compensates for the fork's reverse AMotor (it inverts every axis when the first body is fixed), so the upstream behaviour would break its joints.

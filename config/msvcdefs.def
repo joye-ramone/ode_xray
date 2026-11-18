@@ -315,6 +315,8 @@ dWorldSetQuickStepNumIterations
 dWorldGetQuickStepNumIterations
 dWorldSetQuickStepW
 dWorldGetQuickStepW
+dSetQuickStepGroupShuffle
+dGetQuickStepGroupShuffle
 dWorldSetContactMaxCorrectingVel
 dWorldGetContactMaxCorrectingVel
 dWorldSetContactSurfaceLayer

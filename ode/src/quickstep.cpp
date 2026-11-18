@@ -346,6 +346,12 @@ static int compare_index_error (const void *a, const void *b)
 // fixed seed: constraint shuffling stays reproducible from run to run
 static thread_local std::mt19937 rng(5489u);
 
+// OGSR (include/ode/objects.h dSetQuickStepGroupShuffle): shuffle the findex < 0 rows and the findex >= 0 rows (friction) apart, so a
+// friction row never runs before the normal row its limit comes from (upstream b2f959b1). 0 (default): one shuffle of all rows, as before.
+static int dxQuickStepGroupShuffle = 0;
+extern "C" void dSetQuickStepGroupShuffle (int on) { dxQuickStepGroupShuffle = on; }
+extern "C" int dGetQuickStepGroupShuffle (void) { return dxQuickStepGroupShuffle; }
+
 static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *body,
 					 dRealPtr invI, dRealMutablePtr lambda, dRealMutablePtr fc, dRealMutablePtr b,
 					 dRealMutablePtr lo, dRealMutablePtr hi, dRealPtr cfm, int *findex,
@@ -421,8 +427,11 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 	// make sure constraints with findex < 0 come first.
 	j=0;
 	for (i=0; i<m; i++) if (findex[i] < 0) order[j++].index = i;
+	const int head_size = j; // rows with findex < 0, order[0 .. head_size)
 	for (i=0; i<m; i++) if (findex[i] >= 0) order[j++].index = i;
 	dIASSERT (j==m);
+#else
+	const int head_size = m;
 #endif
 
 	for (int iteration=0; iteration < num_iterations; iteration++) {
@@ -465,7 +474,13 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 #endif
 #ifdef RANDOMLY_REORDER_CONSTRAINTS
 		if ((iteration & 3) == 0) {
-			std::shuffle(order, order + m, rng);
+			if (dxQuickStepGroupShuffle) {
+				std::shuffle(order, order + head_size, rng);
+				std::shuffle(order + head_size, order + m, rng);
+			}
+			else {
+				std::shuffle(order, order + m, rng);
+			}
 		}
 #endif
 
