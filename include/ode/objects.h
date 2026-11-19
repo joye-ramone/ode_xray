@@ -53,6 +53,11 @@ void dWorldSetQuickStepNumIterations (dWorldID, int num);
 int dWorldGetQuickStepNumIterations (dWorldID);
 void dWorldSetQuickStepW (dWorldID, dReal param);
 dReal dWorldGetQuickStepW (dWorldID);
+/* OGSR: QuickStep shuffles the constraint rows with findex < 0 and the friction rows (findex >= 0) separately, so a friction row never
+ * runs before the normal row its limit comes from (upstream b2f959b1). 0 (default): one shuffle of all rows, the original behaviour.
+ * Global for every world (islands are worlds), like the other QuickStep parameters of this fork. */
+void dSetQuickStepGroupShuffle (int on);
+int dGetQuickStepGroupShuffle (void);
 
 /* World contact parameter functions */
 
@@ -94,8 +99,12 @@ void  dBodySetAutoDisableDefaults (dBodyID);
 
 /* bodies */
 
-dBodyID dBodyCreate (dWorldID);
-void dBodyDestroy (dBodyID);
+dBodyID dBodyCreate		(dWorldID);
+void dBodyDestroy		(dBodyID);
+void dWorldAddBody		(dWorldID,dBodyID);
+void dWorldAddJoint		(dWorldID,dJointID);
+void dWorldRemoveBody	(dWorldID,dBodyID);
+void dWorldRemoveJoint	(dWorldID,dJointID);
 
 void  dBodySetData (dBodyID, void *data);
 void *dBodyGetData (dBodyID);
@@ -161,6 +170,9 @@ int dBodyIsEnabled (dBodyID);
 void dBodySetGravityMode (dBodyID b, int mode);
 int dBodyGetGravityMode (dBodyID b);
 
+void dBodySetNoUpdatePosMode(dBodyID b, int mode);
+int dBodyGetNoUpdatePosMode(dBodyID b);
+
 
 /* joints */
 
@@ -168,6 +180,7 @@ dJointID dJointCreateBall (dWorldID, dJointGroupID);
 dJointID dJointCreateHinge (dWorldID, dJointGroupID);
 dJointID dJointCreateSlider (dWorldID, dJointGroupID);
 dJointID dJointCreateContact (dWorldID, dJointGroupID, const dContact *);
+dJointID dJointCreateContactSpecial (dWorldID, dJointGroupID, const dContact *);
 dJointID dJointCreateHinge2 (dWorldID, dJointGroupID);
 dJointID dJointCreateUniversal (dWorldID, dJointGroupID);
 dJointID dJointCreateFixed (dWorldID, dJointGroupID);
@@ -208,6 +221,7 @@ void dJointSetUniversalAxis2 (dJointID, dReal x, dReal y, dReal z);
 void dJointSetUniversalParam (dJointID, int parameter, dReal value);
 void dJointAddUniversalTorques(dJointID joint, dReal torque1, dReal torque2);
 void dJointSetFixed (dJointID);
+void dJointSetFixedQuaternionPos (dJointID joint,dQuaternion quaternion,dReal* pos);
 void dJointSetAMotorNumAxes (dJointID, int num);
 void dJointSetAMotorAxis (dJointID, int anum, int rel,
 			  dReal x, dReal y, dReal z);

@@ -35,6 +35,9 @@ typedef struct dMass dMass;
 
 void dMassSetZero (dMass *);
 
+/* 1 when the mass can go to a body: finite, mass > 0, inertia positive definite, centre of mass consistent with it (OGSR) */
+int dMassCheck (const dMass *);
+
 void dMassSetParameters (dMass *, dReal themass,
 			 dReal cgx, dReal cgy, dReal cgz,
 			 dReal I11, dReal I22, dReal I33,

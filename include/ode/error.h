@@ -55,6 +55,14 @@ void dError (int num, const char *msg, ...);
 void dDebug (int num, const char *msg, ...);
 void dMessage (int num, const char *msg, ...);
 
+/* runtime argument validation, independent of dNODEBUG (OGSR). 0 (default): off, stock behaviour. Otherwise the public setters that put
+ * numbers into bodies, masses, geoms and joints check them (finite, positive sizes and masses, a positive definite inertia, non-zero
+ * axes, ERP in [0, 1], CFM >= 0) and ignore a call with a bad argument; every rejection goes to the message handler as d_ERR_VALIDATE
+ * with the function's name and is counted. */
+void dSetValidation (int level);
+int dGetValidation (void);
+unsigned dGetValidationFailures (void);
+
 
 #ifdef __cplusplus
 }
