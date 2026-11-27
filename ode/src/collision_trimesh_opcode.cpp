@@ -30,7 +30,8 @@
 #define TRIMESH_INTERNAL
 #include "collision_trimesh_internal.h"
 
-#if dTRIMESH_ENABLED && dTRIMESH_OPCODE
+#if dTRIMESH_ENABLED
+#if dTRIMESH_OPCODE
 
 // Trimesh data
 dxTriMeshData::dxTriMeshData() : UseFlags( NULL )
@@ -698,6 +699,8 @@ void dGeomTriMeshSetData(dGeomID g, dTriMeshDataID Data)
 {
 	dUASSERT(g && g->type == dTriMeshClass, "argument not a trimesh");
 	((dxTriMesh*)g)->Data = Data;
+	// I changed my data -- I know nothing about my own AABB anymore.
+	((dxTriMesh*)g)->gflags |= (GEOM_DIRTY|GEOM_AABB_BAD);
 }
 
 dTriMeshDataID dGeomTriMeshGetData(dGeomID g)
@@ -826,4 +829,5 @@ void dGeomTriMeshDataUpdate(dTriMeshDataID g) {
     g->UpdateData();
 }
 
-#endif
+#endif // dTRIMESH_OPCODE
+#endif // dTRIMESH_ENABLED

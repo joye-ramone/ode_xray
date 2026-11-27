@@ -161,6 +161,10 @@ struct dxJointLimitMotor {
 struct dxJointBall : public dxJoint {
   dVector3 anchor1;		// anchor w.r.t first body
   dVector3 anchor2;		// anchor w.r.t second body
+  dReal erp;			// error reduction
+  dReal cfm;			// constraint force mix in
+  void set (int num, dReal value);
+  dReal get (int num);
 };
 extern struct dxJoint::Vtable __dball_vtable;
 
@@ -233,7 +237,6 @@ struct dxJointPR : public dxJoint {
                             ///<  of body1.
                             ///< That should be aligned with body1 center along axisP
                             ///< This is calculated whe the axis are set.
-  dVector3 prev;            ///< Previous position in world frame of cm of body to w.r.t anchor2.
   dxJointLimitMotor limotR; ///< limit and motor information for the rotoide articulation.
   dxJointLimitMotor limotP; ///< limit and motor information for the prismatic articulation.
 };
@@ -325,6 +328,10 @@ extern struct dxJoint::Vtable __dplane2d_vtable;
 struct dxJointFixed : public dxJoint {
   dQuaternion qrel;		// initial relative rotation body1 -> body2
   dVector3 offset;		// relative offset between the bodies
+  dReal erp;			// error reduction parameter
+  dReal cfm;			// constraint force mix-in
+  void set (int num, dReal value);
+  dReal get (int num);
 };
 extern struct dxJoint::Vtable __dfixed_vtable;
 

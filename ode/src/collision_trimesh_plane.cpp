@@ -41,6 +41,7 @@ int dCollideTrimeshPlane( dxGeom *o1, dxGeom *o2, int flags, dContactGeom* conta
 	dIASSERT( skip >= (int)sizeof( dContactGeom ) );
 	dIASSERT( o1->type == dTriMeshClass );
 	dIASSERT( o2->type == dPlaneClass );
+	dIASSERT ((flags & NUMC_MASK) >= 1);
 
 	// Alias pointers to the plane and trimesh
 	dxTriMesh* trimesh = (dxTriMesh*)( o1 );
@@ -49,11 +50,7 @@ int dCollideTrimeshPlane( dxGeom *o1, dxGeom *o2, int flags, dContactGeom* conta
 	int contact_count = 0;
 
 	// Cache the maximum contact count.
-	const int contact_max = ( flags & 0x0ffff );
-
-	// Degenerate case where there are no contact slots.
-	if ( contact_count >= contact_max )
-		return contact_count; // <=== STOP HERE
+	const int contact_max = ( flags & NUMC_MASK );
 
 	// Cache trimesh position and rotation.
 	const dVector3& trimesh_pos = *(const dVector3*)dGeomGetPosition( trimesh );
@@ -70,7 +67,7 @@ int dCollideTrimeshPlane( dxGeom *o1, dxGeom *o2, int flags, dContactGeom* conta
 	dReal alpha;
 	dVector3 vertex;
 
-#ifndef dSINGLE
+#if !defined(dSINGLE) || 1
 	dVector3 int_vertex;		// Intermediate vertex for double precision mode.
 #endif // dSINGLE
 
@@ -87,11 +84,11 @@ int dCollideTrimeshPlane( dxGeom *o1, dxGeom *o2, int flags, dContactGeom* conta
 			// Get Vertex
 			//
 
-#ifdef dSINGLE
+#if defined(dSINGLE) && 0 // Always assign via intermediate array as otherwise it is an incapsulation violation
 
 			dMULTIPLY0_331( vertex, trimesh_R, (float*)( VP.Vertex[ v ] ) );
 
-#else // dDOUBLE
+#else // dDOUBLE || 1
 
 			// OPCODE data is in single precision format.
 			int_vertex[ 0 ] = VP.Vertex[ v ]->x;
@@ -153,6 +150,7 @@ int dCollideTrimeshPlane( dxGeom *o1, dxGeom *o2, int flags, dContactGeom* conta
 	dIASSERT( skip >= (int)sizeof( dContactGeom ) );
 	dIASSERT( o1->type == dTriMeshClass );
 	dIASSERT( o2->type == dPlaneClass );
+	dIASSERT ((flags & NUMC_MASK) >= 1);
 
 	// Alias pointers to the plane and trimesh
 	dxTriMesh* trimesh = (dxTriMesh*)( o1 );
@@ -173,37 +171,40 @@ int dCollideTrimeshPlane( dxGeom *o1, dxGeom *o2, int flags, dContactGeom* conta
 	}
 
 
+	unsigned int contactcount = collision_result.m_size;
+	unsigned int contactmax = (unsigned int)(flags & NUMC_MASK);
+	if (contactcount > contactmax)
+	{
+		contactcount = contactmax;
+	}
+
 	dContactGeom* pcontact;
-	int contactcount = 0;
 	vec4f * planecontact_results = GIM_DYNARRAY_POINTER(vec4f,collision_result);
 
-    for(unsigned int i = 0; i < collision_result.m_size; i++ )
+    for(unsigned int i = 0; i < contactcount; i++ )
 	{
-        if(contactcount < (flags & 0xffff))
-        {
-            pcontact = SAFECONTACT(flags, contacts, contactcount, skip);
-            contactcount++;
-            pcontact->pos[0] = (*planecontact_results)[0];
-            pcontact->pos[1] = (*planecontact_results)[1];
-            pcontact->pos[2] = (*planecontact_results)[2];
-            pcontact->pos[3] = 1.0f;
+        pcontact = SAFECONTACT(flags, contacts, i, skip);
 
-            pcontact->normal[0] = plane[0];
-            pcontact->normal[1] = plane[1];
-            pcontact->normal[2] = plane[2];
-            pcontact->normal[3] = 0;
+        pcontact->pos[0] = (*planecontact_results)[0];
+        pcontact->pos[1] = (*planecontact_results)[1];
+        pcontact->pos[2] = (*planecontact_results)[2];
+        pcontact->pos[3] = REAL(1.0);
 
-            pcontact->depth = (*planecontact_results)[3];
-            pcontact->g1 = o1;
-            pcontact->g2 = o2;
+        pcontact->normal[0] = plane[0];
+        pcontact->normal[1] = plane[1];
+        pcontact->normal[2] = plane[2];
+        pcontact->normal[3] = 0;
 
-        }
+        pcontact->depth = (*planecontact_results)[3];
+        pcontact->g1 = o1;
+        pcontact->g2 = o2;
+
         planecontact_results++;
 	 }
 
 	 GIM_DYNARRAY_DESTROY(collision_result);
 
-	return contactcount;
+	return (int)contactcount;
 }
 #endif // dTRIMESH_GIMPACT
 

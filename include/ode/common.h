@@ -92,6 +92,9 @@ msg " in %s() File %s Line %d", __FUNCTION__, __FILE__,__LINE__);
 #endif
 #define dAASSERT(a) dUASSERT(a,"Bad argument(s)")
 
+// Macro used to suppress unused variable warning
+#define dVARIABLEUSED(a) ((void)a)
+
 /* floating point data type, vector, matrix and quaternion types */
 
 #if defined(dSINGLE)
@@ -105,6 +108,12 @@ typedef double dReal;
 #error You must #define dSINGLE or dDOUBLE
 #endif
 
+// Detect if we've got both trimesh engines enabled.
+#if dTRIMESH_ENABLED
+#if dTRIMESH_OPCODE && dTRIMESH_GIMPACT
+#error You can only #define dTRIMESH_OPCODE or dTRIMESH_GIMPACT, not both.
+#endif
+#endif // dTRIMESH_ENABLED
 
 /* round an integer up to a multiple of 4, except that 0 and 1 are unmodified
  * (used to compute matrix leading dimensions)
@@ -133,6 +142,7 @@ typedef dReal dQuaternion[4];
 #define dFabs(x) (fabsf(x))			/* absolute value */
 #define dAtan2(y,x) (atan2f(y,x))		/* arc tangent with 2 args */
 #define dFMod(a,b) (fmodf(a,b))		/* modulo */
+#define dFloor(x) floorf(x)			/* floor */
 
 #ifdef HAVE___ISNANF
 #define dIsNan(x) (__isnanf(x))
@@ -166,6 +176,8 @@ typedef dReal dQuaternion[4];
 #define dFabs(x) fabs(x)
 #define dAtan2(y,x) atan2((y),(x))
 #define dFMod(a,b) (fmod((a),(b)))
+#define dFloor(x) floor(x)
+
 #ifdef HAVE___ISNAN
 #define dIsNan(x) (__isnan(x))
 #elif defined(HAVE__ISNAN)
@@ -309,7 +321,8 @@ enum {
   dParamStopCFM, \
   /* parameters for suspension */ \
   dParamSuspensionERP, \
-  dParamSuspensionCFM,
+  dParamSuspensionCFM, \
+  dParamERP, \
 
 #define D_ALL_PARAM_NAMES_X(start,x) \
   /* parameters for limits and motors */ \
@@ -324,7 +337,8 @@ enum {
   dParamStopCFM ## x, \
   /* parameters for suspension */ \
   dParamSuspensionERP ## x, \
-  dParamSuspensionCFM ## x,
+  dParamSuspensionCFM ## x, \
+  dParamERP ## x,
 
 enum {
   D_ALL_PARAM_NAMES(0)

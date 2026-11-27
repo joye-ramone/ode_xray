@@ -3,7 +3,7 @@
 	ProjectType="Visual C++"
 	Version="8.00"
 	Name="ode"
-	ProjectGUID="{247E6601-C6F1-5D49-A516-A2516E524C53}"
+	ProjectGUID="{2A8430BA-889E-EE4A-B1E3-A3231F6816EE}"
 	RootNamespace="ode"
 	Keyword="Win32Proj"
 	>
@@ -56,6 +56,7 @@
 			/>
 			<Tool
 				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="WIN32;_CRT_SECURE_NO_DEPRECATE;ODE_DLL"
 				AdditionalIncludeDirectories="../../include;../../OPCODE;../../GIMPACT/include"
 			/>
 			<Tool
@@ -139,6 +140,7 @@
 			/>
 			<Tool
 				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="WIN32;_CRT_SECURE_NO_DEPRECATE;ODE_DLL"
 				AdditionalIncludeDirectories="../../include;../../OPCODE;../../GIMPACT/include"
 			/>
 			<Tool
@@ -223,6 +225,7 @@
 			/>
 			<Tool
 				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="WIN32;_CRT_SECURE_NO_DEPRECATE;ODE_LIB"
 				AdditionalIncludeDirectories="../../include;../../OPCODE;../../GIMPACT/include"
 			/>
 			<Tool
@@ -298,6 +301,7 @@
 			/>
 			<Tool
 				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="WIN32;_CRT_SECURE_NO_DEPRECATE;ODE_LIB"
 				AdditionalIncludeDirectories="../../include;../../OPCODE;../../GIMPACT/include"
 			/>
 			<Tool
@@ -394,9 +398,6 @@
 				</File>
 				<File
 					RelativePath="..\..\include\ode\odecpp_collision.h">
-				</File>
-				<File
-					RelativePath="..\..\include\ode\odecpp_old.h">
 				</File>
 				<File
 					RelativePath="..\..\include\ode\odemath.h">
@@ -542,6 +543,9 @@
 				</File>
 				<File
 					RelativePath="..\..\ode\src\collision_trimesh_trimesh.cpp">
+				</File>
+				<File
+					RelativePath="..\..\ode\src\collision_trimesh_trimesh_new.cpp">
 				</File>
 				<File
 					RelativePath="..\..\ode\src\collision_util.cpp">
