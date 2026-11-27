@@ -26,7 +26,7 @@ perform tests on all the joint types.
 this should be done using the double precision version of the library.
 
 usage:
-  test_joints [test_number] [g] [i] [e]
+  test_joints [-nXXX] [-g] [-i] [-e] [path_to_textures]
 
 if a test number is given then that specific test is performed, otherwise
 all the tests are performed. the tests are numbered `xxyy', where xx
@@ -36,15 +36,15 @@ number maps to an actual test.
 flags:
   i: the test is interactive.
   g: turn off graphical display (can't use this with `i').
-  e: turn on occasional error purturbations
-
+  e: turn on occasional error perturbations
+  n: performe test XXX
 some tests compute and display error values. these values are scaled so
 <1 is good and >1 is bad. other tests just show graphical results which
 you must verify visually.
 
 */
 
-
+#include <ctype.h>
 #include <ode/ode.h>
 #include <drawstuff/drawstuff.h>
 
@@ -75,6 +75,7 @@ static dJointID joint;
 static int cmd_test_num = -1;
 static int cmd_interactive = 0;
 static int cmd_graphics = 1;
+static char *cmd_path_to_textures = NULL;
 static int cmd_occasional_error = 0;	// perturb occasionally
 
 
@@ -191,6 +192,17 @@ void addSpringForce (dReal ks)
   dBodyAddForce (body[1],ks*(p1[0]-p2[0]),ks*(p1[1]-p2[1]),ks*(p1[2]-p2[2]));
 }
 
+
+// add an oscillating Force to body 0
+
+void addOscillatingForce (dReal fscale)
+{
+  static dReal a=0;
+  dBodyAddForce (body[0],fscale*cos(2*a),fscale*cos(2.7183*a),
+		  fscale*cos(1.5708*a));
+  a += 0.01;
+}
+
 //****************************************************************************
 // stuff specific to the tests
 //
@@ -202,7 +214,7 @@ void addSpringForce (dReal ks)
 //   5xx : contact
 //   6xx : amotor
 //   7xx : universal joint
-
+//   8xx : PR joint (Prismatic and Rotoide)
 
 // setup for the given test. return 0 if there is no such test
 
@@ -453,6 +465,44 @@ int setupTest (int n)
     dJointSetUniversalAxis1 (joint,0,0,1);
     dJointSetUniversalAxis2 (joint, 1, -1,0);
     max_iterations = 100;
+    return 1;
+
+  // Joint PR (Prismatic and Rotoide)
+  case 800:     // 2 body
+  case 801:     // 2 bodies with spring force and prismatic fixed
+  case 802:     // 2 bodies with torque on body1 and prismatic fixed
+    constructWorldForTest (0, 2,
+                           -1.0, 0.0, 1.0,
+                           1.0, 0.0, 1.0,
+                           1,0,0, 1,0,0,
+                           0, 0);
+    joint = dJointCreatePR (world, 0);
+    dJointAttach (joint, body[0], body[1]);
+    dJointSetPRAnchor (joint,-0.5, 0.0, 1.0);
+    dJointSetPRAxis1 (joint, 0, 1, 0);
+    dJointSetPRAxis2 (joint, 1, 0, 0);
+    dJointSetPRParam (joint,dParamLoStop,-0.5);
+    dJointSetPRParam (joint,dParamHiStop,0.5);
+    dJointSetPRParam (joint,dParamLoStop2,0);
+    dJointSetPRParam (joint,dParamHiStop2,0);
+    return 1;
+  case 803:   // 2 bodies with spring force and prismatic NOT fixed
+  case 804:   // 2 bodies with torque force and prismatic NOT fixed
+  case 805:   // 2 bodies with force only on first body
+    constructWorldForTest (0, 2,
+                           -1.0, 0.0, 1.0,
+                           1.0, 0.0, 1.0,
+                           1,0,0, 1,0,0,
+                           0, 0);
+    joint = dJointCreatePR (world, 0);
+    dJointAttach (joint, body[0], body[1]);
+    dJointSetPRAnchor (joint,-0.5, 0.0, 1.0);
+    dJointSetPRAxis1 (joint, 0, 1, 0);
+    dJointSetPRAxis2 (joint, 1, 0, 0);
+    dJointSetPRParam (joint,dParamLoStop,-0.5);
+    dJointSetPRParam (joint,dParamHiStop,0.5);
+    dJointSetPRParam (joint,dParamLoStop2,-0.5);
+    dJointSetPRParam (joint,dParamHiStop2,0.5);
     return 1;
   }
   return 0;
@@ -859,7 +909,26 @@ dReal doStuffAndGetError (int n)
     last_angle = a;
     return fabs(r - er) * 1e4;
   }
-  }
+
+  // ********** slider joint
+  case 801:
+  case 803:
+    addSpringForce (0.25);
+    return dInfinity;
+
+	case 802:
+	case 804: {
+    static dReal a = 0;
+    dBodyAddTorque (body[0], 0, 0.01*cos(1.5708*a), 0);
+    a += 0.01;
+    return dInfinity;
+	}
+
+  case 805:
+    addOscillatingForce (0.1);
+    return dInfinity;
+	}
+
 
   return dInfinity;
 }
@@ -960,6 +1029,9 @@ void doTest (int argc, char **argv, int n, int fatal_if_bad_n)
   fn.step = &simLoop;
   fn.command = 0;
   fn.stop = 0;
+  if (cmd_path_to_textures)
+    fn.path_to_textures = cmd_path_to_textures;
+  else
   fn.path_to_textures = "../../drawstuff/textures";
 
   // run simulation
@@ -990,16 +1062,21 @@ void doTest (int argc, char **argv, int n, int fatal_if_bad_n)
 int main (int argc, char **argv)
 {
   int i;
+  dInitODE();
 
   // process the command line args. anything that starts with `-' is assumed
   // to be a drawstuff argument.
   for (i=1; i<argc; i++) {
-    if (loCase (argv[i][0])=='i' && argv[i][1]==0) cmd_interactive = 1;
-    if (loCase (argv[i][0])=='g' && argv[i][1]==0) cmd_graphics = 0;
-    if (loCase (argv[i][0])=='e' && argv[i][1]==0) cmd_occasional_error = 1;
-    char *endptr;
-    long int n = strtol (argv[i],&endptr,10);
-    if (*endptr == 0) cmd_test_num = n;
+    if ( argv[i][0]=='-' && argv[i][1]=='i' && argv[i][2]==0) cmd_interactive = 1;
+    else if ( argv[i][0]=='-' && argv[i][1]=='g' && argv[i][2]==0) cmd_graphics = 0;
+    else if ( argv[i][0]=='-' && argv[i][1]=='e' && argv[i][2]==0) cmd_graphics = 0;
+    else if ( argv[i][0]=='-' && argv[i][1]=='n' && isdigit(argv[i][2]) ) {
+      char *endptr;
+      long int n = strtol (&(argv[i][2]),&endptr,10);
+			if (*endptr == 0) cmd_test_num = n;
+		}
+    else
+      cmd_path_to_textures = argv[i];
   }
 
   // do the tests
@@ -1010,5 +1087,6 @@ int main (int argc, char **argv)
     doTest (argc,argv,cmd_test_num,1);
   }
 
+  dCloseODE();
   return 0;
 }

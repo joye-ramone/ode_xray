@@ -20,7 +20,7 @@
  *                                                                       *
  *************************************************************************/
 
-#ifdef WIN32		// this prevents warnings when dependencies built
+#if defined(WIN32) || defined(__CYGWIN__)// this prevents warnings when dependencies built
 #include <windows.h>
 #endif
 #include <ode/config.h>
@@ -188,7 +188,7 @@ static LRESULT CALLBACK mainWndProc (HWND hWnd, UINT msg, WPARAM wParam,
 				     LPARAM lParam)
 {
   static int button=0,lastx=0,lasty=0;
-  int ctrl = wParam & MK_CONTROL;
+  int ctrl = int(wParam & MK_CONTROL);
 
   switch (msg) {
   case WM_LBUTTONDOWN:
@@ -224,7 +224,7 @@ static LRESULT CALLBACK mainWndProc (HWND hWnd, UINT msg, WPARAM wParam,
     if (wParam >= ' ' && wParam <= 126) {
       int nexth = (keybuffer_head+1) & 15;
       if (nexth != keybuffer_tail) {
-	keybuffer[keybuffer_head] = wParam;
+	keybuffer[keybuffer_head] = int(wParam);
 	keybuffer_head = nexth;
       }
     }
@@ -251,7 +251,10 @@ static LRESULT CALLBACK mainWndProc (HWND hWnd, UINT msg, WPARAM wParam,
       break;
     }
     case IDM_SINGLE_STEP: {
-      renderer_ss = 1;
+		if (renderer_pause)
+			renderer_ss = 1;
+		else
+			SendMessage( hWnd, WM_COMMAND, IDM_PAUSE, 0 );
       break;
     }
     case IDM_PERF_MONITOR: {
@@ -316,11 +319,12 @@ static void drawStuffStartup()
   static int startup_called = 0;
   if (startup_called) return;
   startup_called = 1;
-  ghInstance = GetModuleHandleA (NULL);
+  if (!ghInstance)
+    ghInstance = GetModuleHandleA (NULL);
   gnCmdShow = SW_SHOWNORMAL;		// @@@ fix this later
 
   // redirect standard I/O to a new console (except on cygwin)
-#ifndef CYGWIN
+#ifndef __CYGWIN__
   FreeConsole();
   if (AllocConsole()==0) dsError ("AllocConsole() failed");
   if (freopen ("CONIN$","rt",stdin)==0) dsError ("could not open stdin");
@@ -467,6 +471,40 @@ extern "C" void dsStop()
   if (main_window) PostMessage (main_window,WM_QUIT,0,0);
 }
 
+
+extern "C" double dsElapsedTime()
+{
+  static double prev=0.0;
+  double curr = timeGetTime()/1000.0;
+  if (!prev)
+    prev=curr;
+  double retval = curr-prev;
+  prev=curr;
+  if (retval>1.0) retval=1.0;
+  if (retval<dEpsilon) retval=dEpsilon;
+  return retval;
+}
+
+
+// JPerkins: if running as a DLL, grab my module handle at load time so
+// I can find the accelerators table later
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
+{
+  switch (fdwReason)
+  {
+  case DLL_PROCESS_ATTACH:
+    ghInstance = hinstDLL;
+    break;
+  }
+  return TRUE;
+}
+
+
+// JPerkins: the new build system can set the entry point of the tests to
+// main(); this code is no longer necessary
+/*
+
 //***************************************************************************
 // windows entry point
 //
@@ -484,3 +522,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   drawStuffStartup();
   return main (0,0);	// @@@ should really pass cmd line arguments
 }
+
+*/
+

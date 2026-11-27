@@ -66,10 +66,11 @@ struct dObject : public dBase {
 
 // auto disable parameters
 struct dxAutoDisable {
-  dReal linear_threshold;	// linear (squared) velocity treshold
-  dReal angular_threshold;	// angular (squared) velocity treshold
   dReal idle_time;		// time the body needs to be idle to auto-disable it
   int idle_steps;		// steps the body needs to be idle to auto-disable it
+  dReal linear_average_threshold;   // linear (squared) average velocity threshold
+  dReal angular_average_threshold;  // angular (squared) average velocity threshold
+  unsigned int average_samples;     // size of the average_lvel and average_avel buffers
 };
 
 
@@ -87,6 +88,15 @@ struct dxContactParameters {
 };
 
 
+
+// position vector and rotation matrix for geometry objects that are not
+// connected to bodies.
+
+struct dxPosR {
+  dVector3 pos;
+  dMatrix3 R;
+};
+
 struct dxBody : public dObject {
   dxJointNode *firstjoint;	// list of attached joints
   int flags;			// some dxBodyFlagXXX flags
@@ -94,9 +104,8 @@ struct dxBody : public dObject {
   dMass mass;			// mass parameters about POR
   dMatrix3 invI;		// inverse of mass.I
   dReal invMass;		// 1 / mass.mass
-  dVector3 pos;			// position of POR (point of reference)
+  dxPosR posr;			// position and orientation of point of reference
   dQuaternion q;		// orientation quaternion
-  dMatrix3 R;			// rotation matrix, always corresponds to q
   dVector3 lvel,avel;		// linear and angular velocity of POR
   dVector3 facc,tacc;		// force and torque accumulators
   dVector3 finite_rot_axis;	// finite rotation axis, unit length or 0=none
@@ -105,6 +114,10 @@ struct dxBody : public dObject {
   dxAutoDisable adis;		// auto-disable parameters
   dReal adis_timeleft;		// time left to be idle
   int adis_stepsleft;		// steps left to be idle
+  dVector3* average_lvel_buffer;      // buffer for the linear average velocity calculation
+  dVector3* average_avel_buffer;      // buffer for the angular average velocity calculation
+  unsigned int average_counter;      // counter/index to fill the average-buffers
+  int average_ready;        // indicates ( with = 1 ), if the Body's buffers are ready for average-calculations
 };
 
 

@@ -126,8 +126,13 @@ int main (int argc, char **argv)
   fn.command = &command;
   fn.stop = 0;
   fn.path_to_textures = "../../drawstuff/textures";
+  if(argc==2)
+    {
+        fn.path_to_textures = argv[1];
+    }
 
   // create world
+  dInitODE();
   world = dWorldCreate();
 
   dMass m;
@@ -156,5 +161,6 @@ int main (int argc, char **argv)
   dsSimulationLoop (argc,argv,352,288,&fn);
 
   dWorldDestroy (world);
+  dCloseODE();
   return 0;
 }

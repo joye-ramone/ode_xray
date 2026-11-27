@@ -41,7 +41,7 @@ this also shows you how to use geom groups.
 #define dsDrawBox dsDrawBoxD
 #define dsDrawSphere dsDrawSphereD
 #define dsDrawCylinder dsDrawCylinderD
-#define dsDrawCappedCylinder dsDrawCappedCylinderD
+#define dsDrawCapsule dsDrawCapsuleD
 #endif
 
 
@@ -220,9 +220,13 @@ int main (int argc, char **argv)
   fn.command = &command;
   fn.stop = 0;
   fn.path_to_textures = "../../drawstuff/textures";
+  if(argc==2)
+    {
+        fn.path_to_textures = argv[1];
+    }
 
   // create world
-
+  dInitODE();
   world = dWorldCreate();
   space = dHashSpaceCreate (0);
   contactgroup = dJointGroupCreate (0);
@@ -309,13 +313,13 @@ int main (int argc, char **argv)
   // run simulation
   dsSimulationLoop (argc,argv,352,288,&fn);
 
-  dJointGroupDestroy (contactgroup);
-  dSpaceDestroy (space);
-  dWorldDestroy (world);
   dGeomDestroy (box[0]);
   dGeomDestroy (sphere[0]);
   dGeomDestroy (sphere[1]);
   dGeomDestroy (sphere[2]);
-
+  dJointGroupDestroy (contactgroup);
+  dSpaceDestroy (space);
+  dWorldDestroy (world);
+  dCloseODE();
   return 0;
 }
