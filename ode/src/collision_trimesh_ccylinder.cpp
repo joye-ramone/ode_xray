@@ -21,7 +21,7 @@
 *************************************************************************/
 
 /*
- *	Triangle-CCylinder(Capsule) collider by Alen Ladavac
+ *	Triangle-Capsule(Capsule) collider by Alen Ladavac
  *  Ported to ODE by Nguyen Binh
  */
 
@@ -30,7 +30,7 @@
 //       There is a problem when you use original Step and set contact friction
 //		surface.mu = dInfinity;
 //		More description : 
-//			When I dropped CCylinder over the bunny ears, it seems to stuck
+//			When I dropped Capsule over the bunny ears, it seems to stuck
 //			there for a while. I think the cause is when you set surface.mu = dInfinity;
 //			the friction force is too high so it just hang the capsule there.
 //			So the good cure for this is to set mu = around 1.5 (in my case)
@@ -73,7 +73,7 @@
 
 // dVector3
 // r=a-b
-#define SUBSTRACT(a,b,r) \
+#define SUBTRACT(a,b,r) \
 	(r)[0]=(a)[0] - (b)[0]; \
 	(r)[1]=(a)[1] - (b)[1]; \
 	(r)[2]=(a)[2] - (b)[2]; 
@@ -152,12 +152,12 @@ typedef struct _sLocalContactData
 	dVector3	vPos;
 	dVector3	vNormal;
 	dReal		fDepth;
+	int			triIndex;
 	int			nFlags; // 0 = filtered out, 1 = OK
 }sLocalContactData;
 
-static const int			gMaxLocalContacts = 32;
-static sLocalContactData	gLocalContacts[gMaxLocalContacts];
-static int					ctContacts = 0;
+static sLocalContactData   *gLocalContacts;
+static unsigned int			ctContacts = 0;
 
 // capsule data
 // real time data
@@ -191,7 +191,7 @@ static dVector3 vV1;
 static dVector3 vV2;
 
 // ODE contact's specific
-static int iFlags;
+static unsigned int iFlags;
 static dContactGeom *ContactGeoms;
 static int iStride;
 
@@ -212,7 +212,7 @@ inline int _IsNearContacts(sLocalContactData& c1,sLocalContactData& c2)
 	dVector3	vDiff;
 
 	// First check if they are "near" in position
-	SUBSTRACT(c1.vPos,c2.vPos,vDiff);
+	SUBTRACT(c1.vPos,c2.vPos,vDiff);
 	if (  (dFabs(vDiff[0]) < fSameContactPositionEpsilon)
 		&&(dFabs(vDiff[1]) < fSameContactPositionEpsilon)
 		&&(dFabs(vDiff[2]) < fSameContactPositionEpsilon))
@@ -221,7 +221,7 @@ inline int _IsNearContacts(sLocalContactData& c1,sLocalContactData& c2)
 	}
 
 	// Second check if they are "near" in normal direction
-	SUBSTRACT(c1.vNormal,c2.vNormal,vDiff);
+	SUBTRACT(c1.vNormal,c2.vNormal,vDiff);
 	if (  (dFabs(vDiff[0]) < fSameContactNormalEpsilon)
 		&&(dFabs(vDiff[1]) < fSameContactNormalEpsilon)
 		&&(dFabs(vDiff[2]) < fSameContactNormalEpsilon) )
@@ -285,21 +285,28 @@ inline int	_ProcessLocalContacts()
 	}
 #endif		
 
-	int iContact = 0;
+	unsigned int iContact = 0;
 	dContactGeom* Contact = 0;
 
-	int nFinalContact = 0;
+	unsigned int nFinalContact = 0;
 
 	for (iContact = 0; iContact < ctContacts; iContact ++)
 	{
+        // Ensure that we haven't created too many contacts
+        if( nFinalContact >= (iFlags & NUMC_MASK)) 
+		{
+            break;
+        }
+
 		if (1 == gLocalContacts[iContact].nFlags)
 		{
 				Contact =  SAFECONTACT(iFlags, ContactGeoms, nFinalContact, iStride);
 				Contact->depth = gLocalContacts[iContact].fDepth;
 				SET(Contact->normal,gLocalContacts[iContact].vNormal);
 				SET(Contact->pos,gLocalContacts[iContact].vPos);
-				Contact->g1 = gCylinder;
-				Contact->g2 = gTriMesh;
+				Contact->g1 = gTriMesh;
+				Contact->g2 = gCylinder;
+				Contact->side2 = gLocalContacts[iContact].triIndex;
 
 				nFinalContact++;
 		}
@@ -454,14 +461,15 @@ inline void _CalculateAxis(const dVector3& v1,
 	dVector3 t1;
 	dVector3 t2;
 
-	SUBSTRACT(v1,v2,t1);
+	SUBTRACT(v1,v2,t1);
 	dCROSS(t2,=,t1,v3);
 	dCROSS(r,=,t2,v4);
 }
 
 static BOOL _cldTestSeparatingAxesOfCapsule(const dVector3 &v0,
 											const dVector3 &v1,
-											const dVector3 &v2) 
+											const dVector3 &v2,
+											uint8 flags) 
 {
 	// calculate caps centers in absolute space
 	dVector3 vCp0;
@@ -485,9 +493,9 @@ static BOOL _cldTestSeparatingAxesOfCapsule(const dVector3 &v0,
 	const dReal fEpsilon = 1e-6f;
 
 	// Translate triangle to Cc cord.
-	SUBSTRACT(v0 , vCapsulePosition, vV0);
-	SUBSTRACT(v1 , vCapsulePosition, vV1);
-	SUBSTRACT(v2 , vCapsulePosition, vV2);
+	SUBTRACT(v0 , vCapsulePosition, vV0);
+	SUBTRACT(v1 , vCapsulePosition, vV1);
+	SUBTRACT(v2 , vCapsulePosition, vV2);
 	
 	// We begin to test for 19 separating axis now
 	// I wonder does it help if we employ the method like ISA-GJK???
@@ -505,192 +513,247 @@ static BOOL _cldTestSeparatingAxesOfCapsule(const dVector3 &v0,
 		return FALSE; 
 	}
 
-	// axis CxE0 - Edge 0
-	dCROSS(vAxis,=,vCapsuleAxis,vE0);
-	//vAxis = dCROSS( vCapsuleAxis cross vE0 );
-	if( _length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 2)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge0)
+	{
+		// axis CxE0 - Edge 0
+		dCROSS(vAxis,=,vCapsuleAxis,vE0);
+		//vAxis = dCROSS( vCapsuleAxis cross vE0 );
+		if( _length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 2)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// axis CxE1 - Edge 1
-	dCROSS(vAxis,=,vCapsuleAxis,vE1);
-	//vAxis = ( vCapsuleAxis cross vE1 );
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 3)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge1)
+	{
+		// axis CxE1 - Edge 1
+		dCROSS(vAxis,=,vCapsuleAxis,vE1);
+		//vAxis = ( vCapsuleAxis cross vE1 );
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 3)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// axis CxE2 - Edge 2
-	//vAxis = ( vCapsuleAxis cross vE2 );
-	dCROSS(vAxis,=,vCapsuleAxis,vE2);
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 4)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge2)
+	{
+		// axis CxE2 - Edge 2
+		//vAxis = ( vCapsuleAxis cross vE2 );
+		dCROSS(vAxis,=,vCapsuleAxis,vE2);
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 4)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// first capsule point
-	// axis ((Cp0-V0) x E0) x E0
-	_CalculateAxis(vCp0,v0,vE0,vE0,vAxis);
-//	vAxis = ( ( vCp0-v0) cross vE0 ) cross vE0;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 5)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge0)
+	{
+		// first capsule point
+		// axis ((Cp0-V0) x E0) x E0
+		_CalculateAxis(vCp0,v0,vE0,vE0,vAxis);
+	//	vAxis = ( ( vCp0-v0) cross vE0 ) cross vE0;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 5)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// axis ((Cp0-V1) x E1) x E1
-	_CalculateAxis(vCp0,v1,vE1,vE1,vAxis);
-	//vAxis = ( ( vCp0-v1) cross vE1 ) cross vE1;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 6)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge1)
+	{
+		// axis ((Cp0-V1) x E1) x E1
+		_CalculateAxis(vCp0,v1,vE1,vE1,vAxis);
+		//vAxis = ( ( vCp0-v1) cross vE1 ) cross vE1;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 6)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// axis ((Cp0-V2) x E2) x E2
-	_CalculateAxis(vCp0,v2,vE2,vE2,vAxis);
-	//vAxis = ( ( vCp0-v2) cross vE2 ) cross vE2;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 7)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge2)
+	{
+		// axis ((Cp0-V2) x E2) x E2
+		_CalculateAxis(vCp0,v2,vE2,vE2,vAxis);
+		//vAxis = ( ( vCp0-v2) cross vE2 ) cross vE2;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 7)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// second capsule point
-	// axis ((Cp1-V0) x E0) x E0
-	_CalculateAxis(vCp1,v0,vE0,vE0,vAxis);	
-	//vAxis = ( ( vCp1-v0 ) cross vE0 ) cross vE0;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 8)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge0)
+	{
+		// second capsule point
+		// axis ((Cp1-V0) x E0) x E0
+		_CalculateAxis(vCp1,v0,vE0,vE0,vAxis);	
+		//vAxis = ( ( vCp1-v0 ) cross vE0 ) cross vE0;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 8)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// axis ((Cp1-V1) x E1) x E1
-	_CalculateAxis(vCp1,v1,vE1,vE1,vAxis);	
-	//vAxis = ( ( vCp1-v1 ) cross vE1 ) cross vE1;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 9)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge1)
+	{
+		// axis ((Cp1-V1) x E1) x E1
+		_CalculateAxis(vCp1,v1,vE1,vE1,vAxis);	
+		//vAxis = ( ( vCp1-v1 ) cross vE1 ) cross vE1;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 9)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// axis ((Cp1-V2) x E2) x E2
-	_CalculateAxis(vCp1,v2,vE2,vE2,vAxis);	
-	//vAxis = ( ( vCp1-v2 ) cross vE2 ) cross vE2;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 10)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kEdge2)
+	{
+		// axis ((Cp1-V2) x E2) x E2
+		_CalculateAxis(vCp1,v2,vE2,vE2,vAxis);	
+		//vAxis = ( ( vCp1-v2 ) cross vE2 ) cross vE2;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 10)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// first vertex on triangle
-	// axis ((V0-Cp0) x C) x C
-	_CalculateAxis(v0,vCp0,vCapsuleAxis,vCapsuleAxis,vAxis);	
-	//vAxis = ( ( v0-vCp0 ) cross vCapsuleAxis ) cross vCapsuleAxis;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 11)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kVert0)
+	{
+		// first vertex on triangle
+		// axis ((V0-Cp0) x C) x C
+		_CalculateAxis(v0,vCp0,vCapsuleAxis,vCapsuleAxis,vAxis);	
+		//vAxis = ( ( v0-vCp0 ) cross vCapsuleAxis ) cross vCapsuleAxis;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 11)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// second vertex on triangle
-	// axis ((V1-Cp0) x C) x C
-	_CalculateAxis(v1,vCp0,vCapsuleAxis,vCapsuleAxis,vAxis);	
-	//vAxis = ( ( v1-vCp0 ) cross vCapsuleAxis ) cross vCapsuleAxis;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 12)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kVert1)
+	{
+		// second vertex on triangle
+		// axis ((V1-Cp0) x C) x C
+		_CalculateAxis(v1,vCp0,vCapsuleAxis,vCapsuleAxis,vAxis);	
+		//vAxis = ( ( v1-vCp0 ) cross vCapsuleAxis ) cross vCapsuleAxis;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 12)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// third vertex on triangle
-	// axis ((V2-Cp0) x C) x C
-	_CalculateAxis(v2,vCp0,vCapsuleAxis,vCapsuleAxis,vAxis);	
-	//vAxis = ( ( v2-vCp0 ) cross vCapsuleAxis ) cross vCapsuleAxis;
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 13)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kVert2)
+	{
+		// third vertex on triangle
+		// axis ((V2-Cp0) x C) x C
+		_CalculateAxis(v2,vCp0,vCapsuleAxis,vCapsuleAxis,vAxis);	
+		//vAxis = ( ( v2-vCp0 ) cross vCapsuleAxis ) cross vCapsuleAxis;
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 13)) { 
+				return FALSE; 
+			}
 		}
 	}
 
 	// Test as separating axes direction vectors between each triangle
 	// edge and each capsule's cap center
 
-	// first triangle vertex and first capsule point
-	//vAxis = v0 - vCp0;
-	SUBSTRACT(v0,vCp0,vAxis);
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 14)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kVert0)
+	{
+		// first triangle vertex and first capsule point
+		//vAxis = v0 - vCp0;
+		SUBTRACT(v0,vCp0,vAxis);
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 14)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// second triangle vertex and first capsule point
-	//vAxis = v1 - vCp0;
-	SUBSTRACT(v1,vCp0,vAxis);
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 15)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kVert1)
+	{
+		// second triangle vertex and first capsule point
+		//vAxis = v1 - vCp0;
+		SUBTRACT(v1,vCp0,vAxis);
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 15)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// third triangle vertex and first capsule point
-	//vAxis = v2 - vCp0;
-	SUBSTRACT(v2,vCp0,vAxis);
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 16)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kVert2)
+	{
+		// third triangle vertex and first capsule point
+		//vAxis = v2 - vCp0;
+		SUBTRACT(v2,vCp0,vAxis);
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 16)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// first triangle vertex and second capsule point
-	//vAxis = v0 - vCp1;
-	SUBSTRACT(v0,vCp1,vAxis);
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 17)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kVert0)
+	{
+		// first triangle vertex and second capsule point
+		//vAxis = v0 - vCp1;
+		SUBTRACT(v0,vCp1,vAxis);
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 17)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// second triangle vertex and second capsule point
-	//vAxis = v1 - vCp1;
-	SUBSTRACT(v1,vCp1,vAxis);
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 18)) { 
-			return FALSE; 
+	if (flags & dxTriMeshData::kVert1)
+	{
+		// second triangle vertex and second capsule point
+		//vAxis = v1 - vCp1;
+		SUBTRACT(v1,vCp1,vAxis);
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 18)) { 
+				return FALSE; 
+			}
 		}
 	}
 
-	// third triangle vertex and second capsule point
-	//vAxis = v2 - vCp1;
-	SUBSTRACT(v2,vCp1,vAxis);
-	if(_length2OfVector3( vAxis ) > fEpsilon ) {
-		if (!_cldTestAxis( v0, v1, v2, vAxis, 19)) { 
-			return FALSE; 
-		}
-	}	
+	if (flags & dxTriMeshData::kVert2)
+	{
+		// third triangle vertex and second capsule point
+		//vAxis = v2 - vCp1;
+		SUBTRACT(v2,vCp1,vAxis);
+		if(_length2OfVector3( vAxis ) > fEpsilon ) {
+			if (!_cldTestAxis( v0, v1, v2, vAxis, 19)) { 
+				return FALSE; 
+			}
+		}	
+	}
 
 	return TRUE;
 }
 
 // test one mesh triangle on intersection with capsule
-static void _cldTestOneTriangleVSCCylinder( const dVector3 &v0, 
+static void _cldTestOneTriangleVSCapsule( const dVector3 &v0, 
 											const dVector3 &v1, 
-											const dVector3 &v2 )
+											const dVector3 &v2,
+											uint8 flags)
 {
 
 	// calculate edges
-	SUBSTRACT(v1,v0,vE0);
-	SUBSTRACT(v2,v1,vE1);
-	SUBSTRACT(v0,v2,vE2);
+	SUBTRACT(v1,v0,vE0);
+	SUBTRACT(v2,v1,vE1);
+	SUBTRACT(v0,v2,vE2);
 
 	dVector3	_minus_vE0;
-	SUBSTRACT(v0,v1,_minus_vE0);
+	SUBTRACT(v0,v1,_minus_vE0);
 
 	// calculate poly normal
 	dCROSS(vN,=,vE1,_minus_vE0);
@@ -726,7 +789,7 @@ static void _cldTestOneTriangleVSCCylinder( const dVector3 &v0,
 	}
 
 	// do intersection test and find best separating axis
-	if(!_cldTestSeparatingAxesOfCapsule(vPnt0, vPnt1, vPnt2) ) 
+	if(!_cldTestSeparatingAxesOfCapsule(vPnt0, vPnt1, vPnt2, flags) ) 
 	{
 		// if not found do nothing
 		return;
@@ -812,9 +875,9 @@ static void _cldTestOneTriangleVSCCylinder( const dVector3 &v0,
 	vCEdgePoint1[2] += vPnt0[2];
 
 	// calculate depths for both contact points
-	SUBSTRACT(vCEdgePoint0,vCapsulePosition,vTemp);
+	SUBTRACT(vCEdgePoint0,vCapsulePosition,vTemp);
 	dReal fDepth0 = dDOT(vTemp,vNormal) - (fBestCenter-fBestrt);
-	SUBSTRACT(vCEdgePoint1,vCapsulePosition,vTemp);
+	SUBTRACT(vCEdgePoint1,vCapsulePosition,vTemp);
 	dReal fDepth1 = dDOT(vTemp,vNormal) - (fBestCenter-fBestrt);
 
 	// clamp depths to zero
@@ -830,18 +893,22 @@ static void _cldTestOneTriangleVSCCylinder( const dVector3 &v0,
 
 	// Cached contacts's data
 	// contact 0
+    if (ctContacts < (iFlags & NUMC_MASK)) {
 	gLocalContacts[ctContacts].fDepth = fDepth0;
 	SET(gLocalContacts[ctContacts].vNormal,vNormal);
 	SET(gLocalContacts[ctContacts].vPos,vCEdgePoint0);
 	gLocalContacts[ctContacts].nFlags = 1;
 	ctContacts++;
 
+        if (ctContacts < (iFlags & NUMC_MASK)) {
 	// contact 1
 	gLocalContacts[ctContacts].fDepth = fDepth1;
 	SET(gLocalContacts[ctContacts].vNormal,vNormal);
 	SET(gLocalContacts[ctContacts].vPos,vCEdgePoint1);
 	gLocalContacts[ctContacts].nFlags = 1;
 	ctContacts++;
+        }
+    }
 
 }
 
@@ -863,8 +930,8 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 	vCapsuleAxis[1] = mCapsuleRotation[1*4 + nCAPSULE_AXIS];
 	vCapsuleAxis[2] = mCapsuleRotation[2*4 + nCAPSULE_AXIS];
 
-	// Get size of CCylinder
-	dGeomCCylinderGetParams(gCylinder,&vCapsuleRadius,&fCapsuleSize);
+	// Get size of Capsule
+	dGeomCapsuleGetParams(gCylinder,&vCapsuleRadius,&fCapsuleSize);
 	fCapsuleSize += 2*vCapsuleRadius;
 
 	const dMatrix3* pTriRot = (const dMatrix3*)dGeomGetRotation(TriMesh);
@@ -874,7 +941,6 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 	memcpy(mTriMeshPos,pTriPos,sizeof(dVector3));	
 
 	// global info for contact creation
-	ctContacts		= 0;
 	iStride			=skip;
 	iFlags			=flags;
 	ContactGeoms	=contact;
@@ -887,6 +953,9 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 	fBestCenter = 0;
 	fBestrt     = 0;
 
+
+
+
 	// reset collision normal
 	vNormal[0] = REAL(0.0);
 	vNormal[1] = REAL(0.0);
@@ -895,27 +964,27 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 	// Will it better to use LSS here? -> confirm Pierre.
 	 OBBCollider& Collider = TriMesh->_OBBCollider;
 
-	 Point cCenter(vCapsulePosition[0],vCapsulePosition[1],vCapsulePosition[2]);
-	 Point cExtents(vCapsuleRadius,vCapsuleRadius,fCapsuleSize/2);
+	 Point cCenter((float) vCapsulePosition[0],(float) vCapsulePosition[1],(float) vCapsulePosition[2]);
+	 Point cExtents((float) vCapsuleRadius,(float) vCapsuleRadius,(float) fCapsuleSize/2);
 
 	 Matrix3x3 obbRot;
 
-	 obbRot[0][0] = mCapsuleRotation[0];
-	 obbRot[1][0] = mCapsuleRotation[1];
-	 obbRot[2][0] = mCapsuleRotation[2];
+	 obbRot[0][0] = (float) mCapsuleRotation[0];
+	 obbRot[1][0] = (float) mCapsuleRotation[1];
+	 obbRot[2][0] = (float) mCapsuleRotation[2];
 
-	 obbRot[0][1] = mCapsuleRotation[4];
-	 obbRot[1][1] = mCapsuleRotation[5];
-	 obbRot[2][1] = mCapsuleRotation[6];
+	 obbRot[0][1] = (float) mCapsuleRotation[4];
+	 obbRot[1][1] = (float) mCapsuleRotation[5];
+	 obbRot[2][1] = (float) mCapsuleRotation[6];
 
-	 obbRot[0][2] = mCapsuleRotation[8];
-	 obbRot[1][2] = mCapsuleRotation[9];
-	 obbRot[2][2] = mCapsuleRotation[10];
+	 obbRot[0][2] = (float) mCapsuleRotation[8];
+	 obbRot[1][2] = (float) mCapsuleRotation[9];
+	 obbRot[2][2] = (float) mCapsuleRotation[10];
 
-	 OBB obbCCylinder(cCenter,cExtents,obbRot);
+	 OBB obbCapsule(cCenter,cExtents,obbRot);
 
-	 Matrix4x4 CCylinderMatrix;
-	 MakeMatrix(vCapsulePosition, mCapsuleRotation, CCylinderMatrix);
+	 Matrix4x4 CapsuleMatrix;
+	 MakeMatrix(vCapsulePosition, mCapsuleRotation, CapsuleMatrix);
 
 	 Matrix4x4 MeshMatrix;
 	 MakeMatrix(mTriMeshPos, mTriMeshRot, MeshMatrix);
@@ -939,11 +1008,16 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 
 		 // Intersect
 		 Collider.SetTemporalCoherence(true);
-		 Collider.Collide(*BoxTC, obbCCylinder, TriMesh->Data->BVTree, null, &MeshMatrix);
+		 Collider.Collide(*BoxTC, obbCapsule, TriMesh->Data->BVTree, null, &MeshMatrix);
 	 }
 	 else {
 		 Collider.SetTemporalCoherence(false);
-		 Collider.Collide(dxTriMesh::defaultBoxCache, obbCCylinder, TriMesh->Data->BVTree, null,&MeshMatrix);
+		 Collider.Collide(dxTriMesh::defaultBoxCache, obbCapsule, TriMesh->Data->BVTree, null,&MeshMatrix);
+	 }
+	 
+	 if (! Collider.GetContactStatus()) {
+	 	// no collision occurred
+	 	return 0;
 	 }
 
 	 // Retrieve data
@@ -957,7 +1031,12 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 			 TriMesh->ArrayCallback(TriMesh, gCylinder, Triangles, TriCount);
 		 }
 
-		int OutTriCount = 0;
+		// allocate buffer for local contacts on stack
+		gLocalContacts = (sLocalContactData*)dALLOCA16(sizeof(sLocalContactData)*(iFlags & NUMC_MASK));
+
+	    int ctContacts0 = ctContacts;
+
+		uint8* UseFlags = TriMesh->Data->UseFlags;
 
 		// loop through all intersecting triangles
 		for (int i = 0; i < TriCount; i++)
@@ -974,9 +1053,14 @@ int dCollideCCTL(dxGeom *o1, dxGeom *o2, int flags, dContactGeom *contact, int s
 			dVector3 dv[3];
 			FetchTriangle(TriMesh, Triint, mTriMeshPos, mTriMeshRot, dv);
 
+			uint8 flags = UseFlags ? UseFlags[Triint] : dxTriMeshData::kUseAll;
+
 			// test this triangle
-			_cldTestOneTriangleVSCCylinder(dv[0],dv[1],dv[2]);
+			_cldTestOneTriangleVSCapsule(dv[0],dv[1],dv[2], flags);
 			
+			// fill-in tri index for generated contacts
+			for (; ctContacts0<ctContacts; ctContacts0++)
+				gLocalContacts[ctContacts0].triIndex = Triint;
 		}
 	 }
 

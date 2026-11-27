@@ -38,6 +38,12 @@
 #define TRIMESH_INTERNAL
 #include "collision_trimesh_internal.h"
 
+static void
+GenerateContact(int in_Flags, dContactGeom* in_Contacts, int in_Stride,  
+                dxGeom* in_g1,  dxGeom* in_g2,
+                const dVector3 in_ContactPos, const dVector3 in_Normal, dReal in_Depth,
+                int& OutTriCount);
+
 
 // largest number, double or float
 #if defined(dSINGLE)
@@ -745,6 +751,8 @@ static void _cldClipping(const dVector3 &v0, const dVector3 &v1, const dVector3 
     vPntTmp[2]*=0.5f;
 
     // generate contact point between two closest points
+#ifdef ORIG
+    if (ctContacts < (iFlags & 0x0ffff)) {
     dContactGeom* Contact = SAFECONTACT(iFlags, ContactGeoms, ctContacts, iStride);
     Contact->depth = fBestDepth;
     SET(Contact->normal,vBestNormal);
@@ -752,6 +760,11 @@ static void _cldClipping(const dVector3 &v0, const dVector3 &v1, const dVector3 
     Contact->g1 = Geom1;
     Contact->g2 = Geom2;
     ctContacts++;
+    }
+#endif
+    GenerateContact(iFlags, ContactGeoms, iStride,  Geom1, Geom2,
+                    vPntTmp, vBestNormal, fBestDepth, ctContacts);
+
 
 
   // if triangle is the referent face then clip box to triangle face
@@ -913,7 +926,8 @@ static void _cldClipping(const dVector3 &v0, const dVector3 &v1, const dVector3 
       dVector3 vPntTmp;
       ADD(avTempArray2[i],v0,vPntTmp);
 
-      if(ctContacts<(iFlags & NUMC_MASK)) {
+#ifdef ORIG
+    if (ctContacts < (iFlags & 0x0ffff)) {
           dContactGeom* Contact = SAFECONTACT(iFlags, ContactGeoms, ctContacts, iStride);
 
           Contact->depth = -fTempDepth;
@@ -922,9 +936,10 @@ static void _cldClipping(const dVector3 &v0, const dVector3 &v1, const dVector3 
           Contact->g1 = Geom1;
           Contact->g2 = Geom2;
           ctContacts++;
-      } else {
-          break;
-      }
+    }
+#endif
+    GenerateContact(iFlags, ContactGeoms, iStride,  Geom1, Geom2,
+                    vPntTmp, vBestNormal, -fTempDepth, ctContacts);
     }
 
     //dAASSERT(ctContacts>0);
@@ -1033,7 +1048,8 @@ static void _cldClipping(const dVector3 &v0, const dVector3 &v1, const dVector3 
       dVector3 vPntTmp;
       ADD(avTempArray1[i],vHullBoxPos,vPntTmp);
 
-      if(ctContacts<(iFlags & NUMC_MASK)) {
+#ifdef ORIG
+      if (ctContacts < (iFlags & 0x0ffff)) {
           dContactGeom* Contact = SAFECONTACT(iFlags, ContactGeoms, ctContacts, iStride);
 
           Contact->depth = -fTempDepth;
@@ -1042,9 +1058,10 @@ static void _cldClipping(const dVector3 &v0, const dVector3 &v1, const dVector3 
           Contact->g1 = Geom1;
           Contact->g2 = Geom2;
           ctContacts++;
-      } else {
-          break;
       }
+#endif
+      GenerateContact(iFlags, ContactGeoms, iStride,  Geom1, Geom2,
+                      vPntTmp, vBestNormal, -fTempDepth, ctContacts);
     }
 
     //dAASSERT(ctContacts>0);
@@ -1138,21 +1155,21 @@ int dCollideBTL(dxGeom* g1, dxGeom* BoxGeom, int Flags, dContactGeom* Contacts, 
   Box.mCenter.z = vPosBox[2];
 
 
-  Box.mExtents.x = vBoxHalfSize[0];
-  Box.mExtents.y = vBoxHalfSize[1];
-  Box.mExtents.z = vBoxHalfSize[2];
+  Box.mExtents.x = (float)vBoxHalfSize[0];
+  Box.mExtents.y = (float)vBoxHalfSize[1];
+  Box.mExtents.z = (float)vBoxHalfSize[2];
 
-  Box.mRot.m[0][0] = mRotBox[0];
-  Box.mRot.m[1][0] = mRotBox[1];
-  Box.mRot.m[2][0] = mRotBox[2];
+  Box.mRot.m[0][0] = (float)mRotBox[0];
+  Box.mRot.m[1][0] = (float)mRotBox[1];
+  Box.mRot.m[2][0] = (float)mRotBox[2];
 
-  Box.mRot.m[0][1] = mRotBox[4];
-  Box.mRot.m[1][1] = mRotBox[5];
-  Box.mRot.m[2][1] = mRotBox[6];
+  Box.mRot.m[0][1] = (float)mRotBox[4];
+  Box.mRot.m[1][1] = (float)mRotBox[5];
+  Box.mRot.m[2][1] = (float)mRotBox[6];
 
-  Box.mRot.m[0][2] = mRotBox[8];
-  Box.mRot.m[1][2] = mRotBox[9];
-  Box.mRot.m[2][2] = mRotBox[10];
+  Box.mRot.m[0][2] = (float)mRotBox[8];
+  Box.mRot.m[1][2] = (float)mRotBox[9];
+  Box.mRot.m[2][2] = (float)mRotBox[10];
 
   Matrix4x4 amatrix;
   Matrix4x4 BoxMatrix = MakeMatrix(vPosBox, mRotBox, amatrix);
@@ -1174,7 +1191,7 @@ int dCollideBTL(dxGeom* g1, dxGeom* BoxGeom, int Flags, dContactGeom* Contacts, 
 
 		BoxTC = &TriMesh->BoxTCCache[TriMesh->BoxTCCache.size() - 1];
 		BoxTC->Geom = BoxGeom;
-		BoxTC->FatCoeff = 1.0f;
+    BoxTC->FatCoeff = 1.1f; // Pierre recommends this, instead of 1.0
 	}
 
 	// Intersect
@@ -1186,7 +1203,12 @@ int dCollideBTL(dxGeom* g1, dxGeom* BoxGeom, int Flags, dContactGeom* Contacts, 
 		Collider.Collide(dxTriMesh::defaultBoxCache, Box, TriMesh->Data->BVTree, null, 
 						 &MakeMatrix(vPosMesh, mRotMesh, amatrix));	
 	}
-	    
+
+  if (! Collider.GetContactStatus()) {
+  	// no collision occurred
+  	return 0;
+  }
+  
   // Retrieve data
   int TriCount = Collider.GetNbTouchedPrimitives();
   const int* Triangles = (const int*)Collider.GetTouchedPrimitives();
@@ -1196,13 +1218,10 @@ int dCollideBTL(dxGeom* g1, dxGeom* BoxGeom, int Flags, dContactGeom* Contacts, 
          TriMesh->ArrayCallback(TriMesh, BoxGeom, Triangles, TriCount);
     }
     
-    //int OutTriCount = 0;
+    int ctContacts0 = ctContacts;
     
     // loop through all intersecting triangles
     for (int i = 0; i < TriCount; i++){
-        if(ctContacts>=(iFlags & NUMC_MASK)) {
-            break;
-        }
 
         
         const int& Triint = Triangles[i];
@@ -1215,9 +1234,80 @@ int dCollideBTL(dxGeom* g1, dxGeom* BoxGeom, int Flags, dContactGeom* Contacts, 
 
         // test this triangle
         _cldTestOneTriangle(dv[0],dv[1],dv[2]);
+
+		// fill-in tri index for generated contacts
+		for (; ctContacts0<ctContacts; ctContacts0++)
+			SAFECONTACT(iFlags, ContactGeoms, ctContacts0, iStride)->side1 = Triint;
     }
   }
 
 
   return ctContacts;
+}
+
+
+
+
+// GenerateContact - Written by Jeff Smith (jeff@burri.to)
+//   Generate a "unique" contact.  A unique contact has a unique
+//   position or normal.  If the potential contact has the same
+//   position and normal as an existing contact, but a larger
+//   penetration depth, this new depth is used instead
+//
+static void
+GenerateContact(int in_Flags, dContactGeom* in_Contacts, int in_Stride,  
+                dxGeom* in_g1,  dxGeom* in_g2,
+                const dVector3 in_ContactPos, const dVector3 in_Normal, dReal in_Depth,
+                int& OutTriCount)
+{
+    //if (in_Depth < 0.0)
+    //return;
+
+    if (OutTriCount == (in_Flags & 0x0ffff))
+        return; // contacts are full!
+
+    dContactGeom* Contact;
+    dVector3 diff;
+    bool duplicate = false;
+    for (int i=0; i<OutTriCount; i++) 
+    {
+        Contact = SAFECONTACT(in_Flags, in_Contacts, i, in_Stride);
+
+        // same position?
+        for (int j=0; j<3; j++)
+            diff[j] = in_ContactPos[j] - Contact->pos[j];
+        if (dDOT(diff, diff) < dEpsilon) 
+        {
+            // same normal?
+	  if (fabs(dDOT(in_Normal, Contact->normal)) > (dReal(1.0)-dEpsilon)) 
+            {
+                if (in_Depth > Contact->depth)
+                    Contact->depth = in_Depth;
+                duplicate = true;
+            }
+        }
+    }
+    
+    if (!duplicate) 
+    {
+        // Add a new contact
+        Contact = SAFECONTACT(in_Flags, in_Contacts, OutTriCount, in_Stride);
+
+        Contact->pos[0] = in_ContactPos[0];
+        Contact->pos[1] = in_ContactPos[1];
+        Contact->pos[2] = in_ContactPos[2];
+        Contact->pos[3] = 0.0;
+        
+        Contact->normal[0] = in_Normal[0];
+        Contact->normal[1] = in_Normal[1];
+        Contact->normal[2] = in_Normal[2];
+        Contact->normal[3] = 0.0;
+        
+        Contact->depth = in_Depth;
+        
+        Contact->g1 = in_g1;
+        Contact->g2 = in_g2;
+        
+        OutTriCount++;
+    }
 }
