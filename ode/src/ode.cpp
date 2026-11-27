@@ -43,6 +43,16 @@
 
 //****************************************************************************
 // utility
+dReal dxWorld::global_cfm=REAL(1.1363636e-006);
+dReal dxWorld::global_erp=REAL(0.54545456);
+dVector3 dxWorld::gravity={REAL(0.),REAL(-1.),REAL(0.)};
+dxAutoDisable dxWorld::adis = {REAL(0.001)*REAL(0.001), REAL(0.001)*REAL(0.001), 10, 0};
+
+int dxWorld::adis_flag=0;			// auto-disable flag for new bodies
+dxQuickStepParameters dxWorld:: qs={20,REAL(1.1)};
+dxContactParameters dxWorld::contactp={dInfinity,0.001f};
+
+
 
 static inline void initObject (dObject *obj, dxWorld *w)
 {
@@ -221,10 +231,26 @@ void dWorldCheck (dxWorld *w)
 
 //****************************************************************************
 // body
+void	dWorldRemoveBody(dxWorld *w, dxBody* b)
+{
+	dAASSERT (w);dAASSERT (b);dAASSERT(b->world==w);
+	removeObjectFromList (b);
+	b->world->nb--;
+	b->world=0;
+}
+
+
+void	dWorldAddBody(dxWorld *w, dxBody *b)
+{
+	dAASSERT (w);dAASSERT (b);
+	b->world=w;
+	addObjectToList (b,(dObject **) &w->firstbody);
+	w->nb++;
+}
 
 dxBody *dBodyCreate (dxWorld *w)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   dxBody *b = new dxBody;
   initObject (b,w);
   b->firstjoint = 0;
@@ -245,17 +271,15 @@ dxBody *dBodyCreate (dxWorld *w)
   dSetZero (b->facc,4);
   dSetZero (b->tacc,4);
   dSetZero (b->finite_rot_axis,4);
-  addObjectToList (b,(dObject **) &w->firstbody);
-  w->nb++;
+  if (w)	dWorldAddBody(w,b);
 
   // set auto-disable parameters
   dBodySetAutoDisableDefaults (b);	// must do this after adding to world
-  b->adis_stepsleft = b->adis.idle_steps;
-  b->adis_timeleft = b->adis.idle_time;
+//  b->adis_stepsleft = b->adis.idle_steps;
+//  b->adis_timeleft	= b->adis.idle_time;
 
   return b;
 }
-
 
 void dBodyDestroy (dxBody *b)
 {
@@ -282,8 +306,7 @@ void dBodyDestroy (dxBody *b)
     removeJointReferencesFromAttachedBodies (n->joint);
     n = next;
   }
-  removeObjectFromList (b);
-  b->world->nb--;
+  if (b->world) dWorldRemoveBody	(b->world,b);
   delete b;
 }
 
@@ -741,8 +764,8 @@ void dBodyEnable (dBodyID b)
 {
   dAASSERT (b);
   b->flags &= ~dxBodyDisabled;
-  b->adis_stepsleft = b->adis.idle_steps;
-  b->adis_timeleft = b->adis.idle_time;
+ // b->adis_stepsleft = b->adis.idle_steps;
+ // b->adis_timeleft = b->adis.idle_time;
 }
 
 
@@ -774,62 +797,74 @@ int dBodyGetGravityMode (dBodyID b)
   return ((b->flags & dxBodyNoGravity) == 0);
 }
 
+void dBodySetNoUpdatePosMode(dBodyID b, int enabled)
+{
+	dAASSERT(b);
+	if (enabled) b->flags |= dxBodyNoUpdatePos;
+	else b->flags &= ~dxBodyNoUpdatePos;
+}
+
+int dBodyGetNoUpdatePosMode(dBodyID b)
+{
+	dAASSERT(b);
+	return ((b->flags & dxBodyNoUpdatePos) == 0);
+}
 
 // body auto-disable functions
 
 dReal dBodyGetAutoDisableLinearThreshold (dBodyID b)
 {
 	dAASSERT(b);
-	return dSqrt (b->adis.linear_threshold);
+	return 0.f;//dSqrt (b->adis.linear_threshold);
 }
 
 
 void dBodySetAutoDisableLinearThreshold (dBodyID b, dReal linear_threshold)
 {
 	dAASSERT(b);
-	b->adis.linear_threshold = linear_threshold * linear_threshold;
+//	b->adis.linear_threshold = linear_threshold * linear_threshold;
 }
 
 
 dReal dBodyGetAutoDisableAngularThreshold (dBodyID b)
 {
 	dAASSERT(b);
-	return dSqrt (b->adis.angular_threshold);
+	return 0.f;//dSqrt (b->adis.angular_threshold);
 }
 
 
 void dBodySetAutoDisableAngularThreshold (dBodyID b, dReal angular_threshold)
 {
 	dAASSERT(b);
-	b->adis.angular_threshold = angular_threshold * angular_threshold;
+//	b->adis.angular_threshold = angular_threshold * angular_threshold;
 }
 
 
 int dBodyGetAutoDisableSteps (dBodyID b)
 {
 	dAASSERT(b);
-	return b->adis.idle_steps;
+	return 0;//b->adis.idle_steps;
 }
 
 
 void dBodySetAutoDisableSteps (dBodyID b, int steps)
 {
 	dAASSERT(b);
-	b->adis.idle_steps = steps;
+	//b->adis.idle_steps = steps;
 }
 
 
 dReal dBodyGetAutoDisableTime (dBodyID b)
 {
 	dAASSERT(b);
-	return b->adis.idle_time;
+	return 0.f;//b->adis.idle_time;
 }
 
 
 void dBodySetAutoDisableTime (dBodyID b, dReal time)
 {
 	dAASSERT(b);
-	b->adis.idle_time = time;
+	//b->adis.idle_time = time;
 }
 
 
@@ -852,17 +887,35 @@ void dBodySetAutoDisableDefaults (dBodyID b)
 {
 	dAASSERT(b);
 	dWorldID w = b->world;
-	dAASSERT(w);
-	b->adis = w->adis;
-	dBodySetAutoDisableFlag (b, w->adis_flag);
+	//dAASSERT(w);
+	//b->adis.linear_threshold = dWorldGetAutoDisableLinearThreshold (w);
+	//b->adis.angular_threshold = dWorldGetAutoDisableAngularThreshold (w);
+	//b->adis.idle_steps = dWorldGetAutoDisableSteps (w);
+	//b->adis.idle_time = dWorldGetAutoDisableTime (w);
+	dBodySetAutoDisableFlag (b, false);	//. 
 }
 
 //****************************************************************************
 // joints
+void	dWorldAddJoint(dxWorld *w,dxJoint *j)
+{
+	dIASSERT (j&&w);
+	j->world=w;
+	addObjectToList (j,(dObject **) &w->firstjoint);
+	w->nj++;
+
+}
+void	dWorldRemoveJoint(dxWorld* w,dxJoint *j)
+{
+	dIASSERT(w&&j&&w==j->world);
+	removeObjectFromList((dObject*)j);
+	w->nj--;
+	j->world=0;
+}
 
 static void dJointInit (dxWorld *w, dxJoint *j)
 {
-  dIASSERT (w && j);
+  dIASSERT (j);
   initObject (j,w);
   j->vtable = 0;
   j->flags = 0;
@@ -873,15 +926,14 @@ static void dJointInit (dxWorld *w, dxJoint *j)
   j->node[1].body = 0;
   j->node[1].next = 0;
   dSetZero (j->lambda,6);
-  addObjectToList (j,(dObject **) &w->firstjoint);
-  w->nj++;
+  if (w) dWorldAddJoint(w,j);
 }
 
 
 static dxJoint *createJoint (dWorldID w, dJointGroupID group,
 			     dxJoint::Vtable *vtable)
 {
-  dIASSERT (w && vtable);
+  dIASSERT (vtable);
   dxJoint *j;
   if (group) {
     j = (dxJoint*) group->stack.alloc (vtable->size);
@@ -899,21 +951,21 @@ static dxJoint *createJoint (dWorldID w, dJointGroupID group,
 
 dxJoint * dJointCreateBall (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+ // dAASSERT (w);
   return createJoint (w,group,&__dball_vtable);
 }
 
 
 dxJoint * dJointCreateHinge (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__dhinge_vtable);
 }
 
 
 dxJoint * dJointCreateSlider (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+ // dAASSERT (w);
   return createJoint (w,group,&__dslider_vtable);
 }
 
@@ -921,45 +973,52 @@ dxJoint * dJointCreateSlider (dWorldID w, dJointGroupID group)
 dxJoint * dJointCreateContact (dWorldID w, dJointGroupID group,
 			       const dContact *c)
 {
-  dAASSERT (w && c);
+  dAASSERT (c);
   dxJointContact *j = (dxJointContact *)
     createJoint (w,group,&__dcontact_vtable);
   j->contact = *c;
   return j;
 }
-
-
+dxJoint * dJointCreateContactSpecial (dWorldID w, dJointGroupID group,
+							   const dContact *c)
+{
+	dAASSERT (c);
+	dxJointContact *j = (dxJointContact *)
+		createJoint (w,group,&__dcontact_special_vtable);
+	j->contact = *c;
+	return j;
+}
 dxJoint * dJointCreateHinge2 (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__dhinge2_vtable);
 }
 
 
 dxJoint * dJointCreateUniversal (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__duniversal_vtable);
 }
 
 
 dxJoint * dJointCreateFixed (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__dfixed_vtable);
 }
 
 
 dxJoint * dJointCreateNull (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+ // dAASSERT (w);
   return createJoint (w,group,&__dnull_vtable);
 }
 
 
 dxJoint * dJointCreateAMotor (dWorldID w, dJointGroupID group)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   return createJoint (w,group,&__damotor_vtable);
 }
 
@@ -969,8 +1028,10 @@ void dJointDestroy (dxJoint *j)
   dAASSERT (j);
   if (j->flags & dJOINT_INGROUP) return;
   removeJointReferencesFromAttachedBodies (j);
-  removeObjectFromList (j);
-  j->world->nj--;
+  if (j->world)		{
+	  removeObjectFromList (j);
+	  j->world->nj--;
+  }
   dFree (j,j->vtable->size);
 }
 
@@ -1012,8 +1073,8 @@ void dJointGroupEmpty (dJointGroupID group)
   for (i=group->num-1; i >= 0; i--) {
     if (jlist[i]->world) {
       removeJointReferencesFromAttachedBodies (jlist[i]);
-      removeObjectFromList (jlist[i]);
-      jlist[i]->world->nj--;
+      //removeObjectFromList (jlist[i]);
+      ///jlist[i]->world->nj--;
     }
   }
   group->num = 0;
@@ -1026,10 +1087,10 @@ void dJointAttach (dxJoint *joint, dxBody *body1, dxBody *body2)
   // check arguments
   dUASSERT (joint,"bad joint argument");
   dUASSERT (body1 == 0 || body1 != body2,"can't have body1==body2");
-  dxWorld *world = joint->world;
-  dUASSERT ( (!body1 || body1->world == world) &&
-	     (!body2 || body2->world == world),
-	     "joint and bodies must be in same world");
+  //dxWorld *world = joint->world;
+  //dUASSERT ( (!body1 || body1->world == world) &&
+	//     (!body2 || body2->world == world),
+	//     "joint and bodies must be in same world");
 
   // check if the joint can not be attached to just one body
   dUASSERT (!((joint->flags & dJOINT_TWOBODIES) &&
@@ -1158,15 +1219,15 @@ dxWorld * dWorldCreate()
 
   w->adis.linear_threshold = REAL(0.001)*REAL(0.001);	// (magnitude squared)
   w->adis.angular_threshold = REAL(0.001)*REAL(0.001);	// (magnitude squared)
-  w->adis.idle_steps = 10;
-  w->adis.idle_time = 0;
-  w->adis_flag = 0;
+  w->adis.idle_steps	= 10;
+  w->adis.idle_time		= 0;
+  w->adis_flag			= 0;
 
-  w->qs.num_iterations = 20;
-  w->qs.w = REAL(1.3);
+  w->qs.num_iterations	= 20;			// 20 is Default
+  w->qs.w				= REAL(1.1);	// 1.3 is Russ Default, 1.05
 
-  w->contactp.max_vel = dInfinity;
-  w->contactp.min_depth = 0;
+  w->contactp.max_vel	= dInfinity;
+  w->contactp.min_depth = 0.001f;		// should be 0
 
   return w;
 }
@@ -1205,7 +1266,7 @@ void dWorldDestroy (dxWorld *w)
 
 void dWorldSetGravity (dWorldID w, dReal x, dReal y, dReal z)
 {
-  dAASSERT (w);
+  ///dAASSERT (w);
   w->gravity[0] = x;
   w->gravity[1] = y;
   w->gravity[2] = z;
@@ -1223,7 +1284,7 @@ void dWorldGetGravity (dWorldID w, dVector3 g)
 
 void dWorldSetERP (dWorldID w, dReal erp)
 {
-  dAASSERT (w);
+ // dAASSERT (w);
   w->global_erp = erp;
 }
 
@@ -1237,7 +1298,7 @@ dReal dWorldGetERP (dWorldID w)
 
 void dWorldSetCFM (dWorldID w, dReal cfm)
 {
-  dAASSERT (w);
+  //dAASSERT (w);
   w->global_cfm = cfm;
 }
 
@@ -1282,126 +1343,126 @@ void dWorldImpulseToForce (dWorldID w, dReal stepsize,
 
 dReal dWorldGetAutoDisableLinearThreshold (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return dSqrt (w->adis.linear_threshold);
 }
 
 
 void dWorldSetAutoDisableLinearThreshold (dWorldID w, dReal linear_threshold)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis.linear_threshold = linear_threshold * linear_threshold;
 }
 
 
 dReal dWorldGetAutoDisableAngularThreshold (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return dSqrt (w->adis.angular_threshold);
 }
 
 
 void dWorldSetAutoDisableAngularThreshold (dWorldID w, dReal angular_threshold)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis.angular_threshold = angular_threshold * angular_threshold;
 }
 
 
 int dWorldGetAutoDisableSteps (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->adis.idle_steps;
 }
 
 
 void dWorldSetAutoDisableSteps (dWorldID w, int steps)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis.idle_steps = steps;
 }
 
 
 dReal dWorldGetAutoDisableTime (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->adis.idle_time;
 }
 
 
 void dWorldSetAutoDisableTime (dWorldID w, dReal time)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis.idle_time = time;
 }
 
 
 int dWorldGetAutoDisableFlag (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->adis_flag;
 }
 
 
 void dWorldSetAutoDisableFlag (dWorldID w, int do_auto_disable)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->adis_flag = (do_auto_disable != 0);
 }
 
 
 void dWorldSetQuickStepNumIterations (dWorldID w, int num)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->qs.num_iterations = num;
 }
 
 
 int dWorldGetQuickStepNumIterations (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->qs.num_iterations;
 }
 
 
 void dWorldSetQuickStepW (dWorldID w, dReal param)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->qs.w = param;
 }
 
 
 dReal dWorldGetQuickStepW (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->qs.w;
 }
 
 
 void dWorldSetContactMaxCorrectingVel (dWorldID w, dReal vel)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->contactp.max_vel = vel;
 }
 
 
 dReal dWorldGetContactMaxCorrectingVel (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->contactp.max_vel;
 }
 
 
 void dWorldSetContactSurfaceLayer (dWorldID w, dReal depth)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	w->contactp.min_depth = depth;
 }
 
 
 dReal dWorldGetContactSurfaceLayer (dWorldID w)
 {
-	dAASSERT(w);
+	//dAASSERT(w);
 	return w->contactp.min_depth;
 }
 

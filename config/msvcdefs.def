@@ -1,5 +1,9 @@
 LIBRARY ODE
 EXPORTS
+dSetAllocHandler
+dSetReallocHandler
+dSetFreeHandler
+dxStepBody
 dAreConnected
 dAreConnectedExcluding
 dBodyAddForce
@@ -25,6 +29,7 @@ dBodyGetFiniteRotationAxis
 dBodyGetFiniteRotationMode
 dBodyGetForce
 dBodyGetGravityMode
+dBodyGetNoUpdatePosMode
 dBodyGetJoint
 dBodyGetLinearVel
 dBodyGetMass
@@ -50,6 +55,7 @@ dBodySetFiniteRotationAxis
 dBodySetFiniteRotationMode
 dBodySetForce
 dBodySetGravityMode
+dBodySetNoUpdatePosMode
 dBodySetLinearVel
 dBodySetMass
 dBodySetPosition
@@ -64,6 +70,9 @@ dClearUpperTriangle
 dCloseODE
 dClosestLineSegmentPoints
 dCollide
+dCollideRaySphere
+dCollideRayBox
+dCollideRayCCylinder
 dCreateBox
 dCreateCCylinder
 dCreateGeom
@@ -72,9 +81,7 @@ dCreateGeomTransform
 dCreatePlane
 dCreateRay
 dCreateSphere
-dDebug
 dDQfromW
-dError
 dFactorCholesky
 dFactorLDLT
 dGeomBoxGetLengths
@@ -99,6 +106,7 @@ dGeomGetRotation
 dGeomGetSpace
 dGeomIsEnabled
 dGeomIsSpace
+dGeomMoved
 dGeomPlaneGetParams
 dGeomPlanePointDepth
 dGeomPlaneSetParams
@@ -139,6 +147,7 @@ dJointAttach
 dJointCreateAMotor
 dJointCreateBall
 dJointCreateContact
+dJointCreateContactSpecial
 dJointCreateFixed
 dJointCreateHinge
 dJointCreateHinge2
@@ -197,6 +206,7 @@ dJointSetBallAnchor
 dJointSetData
 dJointSetFeedback
 dJointSetFixed
+dJointSetFixedQuaternionPos
 dJointSetHinge2Anchor
 dJointSetHinge2Axis1
 dJointSetHinge2Axis2
@@ -229,11 +239,10 @@ dMassSetSphereTotal
 dMassSetZero
 dMassTranslate
 dMaxDifference
-dMessage
 dMultiply0
 dMultiply1
 dMultiply2
-dNormalize3
+dNormalize3_slow
 dNormalize4
 dPlaneSpace
 dQFromAxisAndAngle
@@ -273,12 +282,8 @@ dSpaceGetNumGeoms
 dSpaceQuery
 dSpaceRemove
 dSpaceSetCleanup
-dTestMatrixComparison
-dTestRand
-dTestSolveLCP
 dWorldCreate
 dWorldDestroy
-dWorldExportDIF
 dWorldGetAutoDisableAngularThreshold
 dWorldGetAutoDisableFlag
 dWorldGetAutoDisableLinearThreshold
@@ -309,3 +314,7 @@ dWorldSetContactMaxCorrectingVel
 dWorldGetContactMaxCorrectingVel
 dWorldSetContactSurfaceLayer
 dWorldGetContactSurfaceLayer
+dWorldAddBody
+dWorldAddJoint
+dWorldRemoveBody
+dWorldRemoveJoint
