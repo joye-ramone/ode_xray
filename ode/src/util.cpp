@@ -32,41 +32,8 @@
 
 void dInternalHandleAutoDisabling (dxWorld *world, dReal stepsize)
 {
-	dxBody *bb;
-	for (bb=world->firstbody; bb; bb=(dxBody*)bb->next) {
-		// nothing to do unless this body is currently enabled and has
-		// the auto-disable flag set
-		if ((bb->flags & (dxBodyAutoDisable|dxBodyDisabled)) != dxBodyAutoDisable) continue;
-		
-		// see if the body is idle
-		int idle = 1;			// initial assumption
-		dReal lspeed2 = dDOT(bb->lvel,bb->lvel);
-		if (lspeed2 > bb->adis.linear_threshold) {
-			idle = 0;		// moving fast - not idle
-		}
-		else {
-			dReal aspeed = dDOT(bb->avel,bb->avel);
-			if (aspeed > bb->adis.angular_threshold) {
-				idle = 0;	// turning fast - not idle
-			}
-		}
-	
-		// if it's idle, accumulate steps and time.
-		// these counters won't overflow because this code doesn't run for disabled bodies.
-		if (idle) {
-			bb->adis_stepsleft--;
-			bb->adis_timeleft -= stepsize;
-		}
-		else {
-			bb->adis_stepsleft = bb->adis.idle_steps;
-			bb->adis_timeleft = bb->adis.idle_time;
-		}
-
-		// disable the body if it's idle for a long enough time
-		if (bb->adis_stepsleft < 0 && bb->adis_timeleft < 0) {
-			bb->flags |= dxBodyDisabled;
-		}
-	}
+	// X-Ray: ODE auto-disabling is not used, the engine handles sleeping itself
+	// (the per-body auto-disable fields were removed from dxBody).
 }
 
 
@@ -92,7 +59,9 @@ static inline dReal sinc (dReal x)
 void dxStepBody (dxBody *b, dReal h)
 {
   int j;
-
+#ifdef DEBUG_VALID
+dIASSERT(dValid(b->avel[0])&&dValid(b->avel[1])&&dValid(b->avel[2]));
+#endif
   // handle linear velocity
   for (j=0; j<3; j++) b->pos[j] += h * b->lvel[j];
 
@@ -161,117 +130,54 @@ void dxStepBody (dxBody *b, dReal h)
   // notify all attached geoms that this body has moved
   for (dxGeom *geom = b->geom; geom; geom = dGeomGetBodyNext (geom))
     dGeomMoved (geom);
+
+#ifdef DEBUG_VALID
+dIASSERT(dValid(b->avel[0])&&dValid(b->avel[1])&&dValid(b->avel[2]));
+#endif
 }
 
 //****************************************************************************
 // island processing
 
-// this groups all joints and bodies in a world into islands. all objects
-// in an island are reachable by going through connected bodies and joints.
-// each island can be simulated separately.
-// note that joints that are not attached to anything will not be included
-// in any island, an so they do not affect the simulation.
-//
-// this function starts new island from unvisited bodies. however, it will
-// never start a new islands from a disabled body. thus islands of disabled
-// bodies will not be included in the simulation. disabled bodies are
-// re-enabled if they are found to be part of an active island.
-
+// X-Ray: the engine (CPHIsland) already builds the islands and gives every
+// island its own dxWorld, so the whole world is stepped as a single island.
+// bodies are never auto-disabled here; the engine handles sleeping itself.
 void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper)
 {
-  dxBody *b,*bb,**body;
-  dxJoint *j,**joint;
+	// nothing to do if no bodies
+	if (world->nb <= 0)
+		return;
 
-  // nothing to do if no bodies
-  if (world->nb <= 0) return;
+#	ifdef TIMING
+	dTimerStart ("creating joint and body arrays");
+#	endif
+	dxBody **bodies, *body;
+	dxJoint **joints, *joint;
+	joints = (dxJoint **) ALLOCA (world->nj * sizeof (dxJoint *));
+	bodies = (dxBody **) ALLOCA (world->nb * sizeof (dxBody *));
 
-  // handle auto-disabling of bodies
-  dInternalHandleAutoDisabling (world,stepsize);
-  
-  // make arrays for body and joint lists (for a single island) to go into
-  body = (dxBody**) ALLOCA (world->nb * sizeof(dxBody*));
-  joint = (dxJoint**) ALLOCA (world->nj * sizeof(dxJoint*));
-  int bcount = 0;	// number of bodies in `body'
-  int jcount = 0;	// number of joints in `joint'
+	int nj = 0;
+    for (joint = world->firstjoint; joint; joint = (dxJoint*)joint->next)
+    {
+        if (!joint->node[0].body)
+            continue;		// unattached joint: not part of the island
 
-  // set all body/joint tags to 0
-  for (b=world->firstbody; b; b=(dxBody*)b->next) b->tag = 0;
-  for (j=world->firstjoint; j; j=(dxJoint*)j->next) j->tag = 0;
+        joints[nj++] = joint;
+    }
 
-  // allocate a stack of unvisited bodies in the island. the maximum size of
-  // the stack can be the lesser of the number of bodies or joints, because
-  // new bodies are only ever added to the stack by going through untagged
-  // joints. all the bodies in the stack must be tagged!
-  int stackalloc = (world->nj < world->nb) ? world->nj : world->nb;
-  dxBody **stack = (dxBody**) ALLOCA (stackalloc * sizeof(dxBody*));
+	int nb = 0;
+	for (body = world->firstbody; body; body = (dxBody *) body->next)
+	{
+		body->flags &= ~dxBodyDisabled;
+		bodies[nb++] = body;
 
-  for (bb=world->firstbody; bb; bb=(dxBody*)bb->next) {
-    // get bb = the next enabled, untagged body, and tag it
-    if (bb->tag || (bb->flags & dxBodyDisabled)) continue;
-    bb->tag = 1;
-
-    // tag all bodies and joints starting from bb.
-    int stacksize = 0;
-    b = bb;
-    body[0] = bb;
-    bcount = 1;
-    jcount = 0;
-    goto quickstart;
-    while (stacksize > 0) {
-      b = stack[--stacksize];	// pop body off stack
-      body[bcount++] = b;	// put body on body list
-      quickstart:
-
-      // traverse and tag all body's joints, add untagged connected bodies
-      // to stack
-      for (dxJointNode *n=b->firstjoint; n; n=n->next) {
-	if (!n->joint->tag) {
-	  n->joint->tag = 1;
-	  joint[jcount++] = n->joint;
-	  if (n->body && !n->body->tag) {
-	    n->body->tag = 1;
-	    stack[stacksize++] = n->body;
-	  }
 	}
-      }
-      dIASSERT(stacksize <= world->nb);
-      dIASSERT(stacksize <= world->nj);
-    }
 
-    // now do something with body and joint lists
-    stepper (world,body,bcount,joint,jcount,stepsize);
-
-    // what we've just done may have altered the body/joint tag values.
-    // we must make sure that these tags are nonzero.
-    // also make sure all bodies are in the enabled state.
-    int i;
-    for (i=0; i<bcount; i++) {
-      body[i]->tag = 1;
-      body[i]->flags &= ~dxBodyDisabled;
-    }
-    for (i=0; i<jcount; i++) joint[i]->tag = 1;
-  }
-
-  // if debugging, check that all objects (except for disabled bodies,
-  // unconnected joints, and joints that are connected to disabled bodies)
-  // were tagged.
-# ifndef dNODEBUG
-  for (b=world->firstbody; b; b=(dxBody*)b->next) {
-    if (b->flags & dxBodyDisabled) {
-      if (b->tag) dDebug (0,"disabled body tagged");
-    }
-    else {
-      if (!b->tag) dDebug (0,"enabled body not tagged");
-    }
-  }
-  for (j=world->firstjoint; j; j=(dxJoint*)j->next) {
-    if ((j->node[0].body && (j->node[0].body->flags & dxBodyDisabled)==0) ||
-	(j->node[1].body && (j->node[1].body->flags & dxBodyDisabled)==0)) {
-      if (!j->tag) dDebug (0,"attached enabled joint not tagged");
-    }
-    else {
-      if (j->tag) dDebug (0,"unattached or disabled joint tagged");
-    }
-  }
-# endif
+	// now do something with body and joint lists
+	stepper (world,bodies,nb,joints,nj,stepsize);
+//stepper (world,body,bcount,joint,jcount,stepsize);
+#	ifdef TIMING
+	dTimerEnd ();
+	dTimerReport (stdout, 1);
+#	endif
 }

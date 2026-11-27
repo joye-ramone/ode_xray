@@ -24,6 +24,7 @@
 #include <ode/mass.h>
 #include <ode/odemath.h>
 #include <ode/matrix.h>
+#include "validate.h"
 
 
 #define _I(i,j) I[(i)*4+(j)]
@@ -72,6 +73,28 @@ static int checkMass (dMass *m)
 }
 
 
+// checkMass passes a NaN mass (NaN <= 0 is false) and a NaN inertia can pass the Cholesky test: finite first
+int dxMassValid (const dMass *m)
+{
+  if (!dxFinite (m->mass) || !dxFinite3 (m->c) || !dxFiniteR (m->I)) return 0;
+  return checkMass ((dMass *) m);
+}
+
+extern "C" int dMassCheck (const dMass *m)
+{
+  dAASSERT (m);
+  return dxMassValid (m);
+}
+
+// the sizes and density / mass a dMassSet* call computes from: report only, the result goes to a body through dBodySetMass, which rejects it
+// (sizes a, b > 0; c >= 0 when zero_c, else > 0: a cylinder may have no length, a box needs all three)
+static void validateMassInput (const char *fn, dReal density_or_mass, dReal a, dReal b, dReal c, bool zero_c)
+{
+  dVALIDATE_REPORT (dxFinite (density_or_mass) && density_or_mass > 0, fn, "density or mass %g", (double) density_or_mass);
+  dVALIDATE_REPORT (dxFinite3 (a, b, c) && a > 0 && b > 0 && (zero_c ? c >= 0 : c > 0), fn, "sizes %g %g %g", (double) a, (double) b, (double) c);
+}
+
+
 void dMassSetZero (dMass *m)
 {
   dAASSERT (m);
@@ -102,6 +125,7 @@ void dMassSetParameters (dMass *m, dReal themass,
   m->_I(2,0) = I13;
   m->_I(2,1) = I23;
   checkMass (m);
+  dVALIDATE_REPORT (dxMassValid (m),"dMassSetParameters","mass %g is not valid",(double) themass);
 }
 
 
@@ -115,6 +139,7 @@ void dMassSetSphere (dMass *m, dReal density, dReal radius)
 void dMassSetSphereTotal (dMass *m, dReal total_mass, dReal radius)
 {
   dAASSERT (m);
+  validateMassInput ("dMassSetSphereTotal",total_mass,radius,radius,radius,false);
   dMassSetZero (m);
   m->mass = total_mass;
   dReal II = REAL(0.4) * total_mass * radius*radius;
@@ -134,6 +159,7 @@ void dMassSetCappedCylinder (dMass *m, dReal density, int direction,
   dReal M1,M2,Ia,Ib;
   dAASSERT (m);
   dUASSERT (direction >= 1 && direction <= 3,"bad direction number");
+  validateMassInput ("dMassSetCappedCylinder",density,radius,radius,length,true);
   dMassSetZero (m);
   M1 = M_PI*radius*radius*length*density;			// cylinder mass
   M2 = (REAL(4.0)/REAL(3.0))*M_PI*radius*radius*radius*density;	// total cap mass
@@ -172,6 +198,7 @@ void dMassSetCylinderTotal (dMass *m, dReal total_mass, int direction,
 {
   dReal r2,I;
   dAASSERT (m);
+  validateMassInput ("dMassSetCylinderTotal",total_mass,radius,radius,length,true);
   dMassSetZero (m);
   r2 = radius*radius;
   m->mass = total_mass;
@@ -198,6 +225,7 @@ void dMassSetBoxTotal (dMass *m, dReal total_mass,
 		       dReal lx, dReal ly, dReal lz)
 {
   dAASSERT (m);
+  validateMassInput ("dMassSetBoxTotal",total_mass,lx,ly,lz,false);
   dMassSetZero (m);
   m->mass = total_mass;
   m->_I(0,0) = total_mass/REAL(12.0) * (ly*ly + lz*lz);
@@ -213,6 +241,8 @@ void dMassSetBoxTotal (dMass *m, dReal total_mass,
 void dMassAdjust (dMass *m, dReal newmass)
 {
   dAASSERT (m);
+  // a zero mass (a box of zero volume) gave a NaN scale
+  dVALIDATE (dxFinite (newmass) && newmass > 0 && dxFinite (m->mass) && m->mass > 0,"dMassAdjust","mass %g -> %g, left unchanged",(double) m->mass,(double) newmass);
   dReal scale = newmass / m->mass;
   m->mass = newmass;
   for (int i=0; i<3; i++) for (int j=0; j<3; j++) m->_I(i,j) *= scale;
